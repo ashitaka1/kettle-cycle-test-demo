@@ -2,7 +2,7 @@
 
 A Viam robotics platform demo for appliance R&D labs, demonstrating cycle testing, failure detection, data capture, and alerting.
 
-> **Status:** Milestone 3 complete — trial lifecycle with continuous cycling and data capture readiness. See [product_spec.md](product_spec.md) for full roadmap.
+> **Status:** Milestone 4 complete — force sensor captures load cell data during put-down phase via DoCommand coordination. See [product_spec.md](product_spec.md) for full roadmap.
 
 ## What This Demo Does
 
@@ -35,6 +35,14 @@ The controller orchestrates arm movements, trial lifecycle, and cycle execution.
 - **Tests:** `sensor_test.go`
 
 The sensor exposes controller state (trial ID, cycle count, running status) for Viam data capture. Its `should_sync` field enables conditional data capture—only syncing data when a trial is active.
+
+**Force Sensor Component:**
+- **API:** `rdk:component:sensor`
+- **Model:** `viamdemo:kettle-cycle-test:force-sensor`
+- **Implementation:** `force_sensor.go`
+- **Tests:** `force_sensor_test.go`
+
+The force sensor captures force profiles during the put-down phase of each cycle. It demonstrates the "wrapper component" pattern—a virtual component that enriches raw sensor data by observing controller state. During the put-down phase, it captures a rolling array of force samples and reports the maximum force detected.
 
 **Entry Point:**
 - `cmd/module/main.go` - Registers both resources with the Viam module system
@@ -69,14 +77,18 @@ In the Viam app, add a generic service to your machine:
 {
   "arm": "your-arm-name",
   "resting_position": "resting-switch-name",
-  "pour_prep_position": "pour-prep-switch-name"
+  "pour_prep_position": "pour-prep-switch-name",
+  "force_sensor": "force-sensor"
 }
 ```
 
-All three fields are required:
+Required fields:
 - `arm` - Name of the arm component (explicit dependency)
 - `resting_position` - Position-saver switch for the resting pose
 - `pour_prep_position` - Position-saver switch for the pour-prep pose
+
+Optional fields:
+- `force_sensor` - Name of force sensor component to coordinate with during cycles
 
 ### Adding the Cycle Sensor
 
@@ -93,6 +105,35 @@ Add a sensor component to expose controller state for data capture:
 ```
 
 The sensor depends on the controller service and exposes its state through the standard sensor `Readings()` interface.
+
+### Adding the Force Sensor
+
+Add a sensor component to capture force profiles during put-down:
+- **Name:** `force-sensor`
+- **API:** `rdk:component:sensor`
+- **Model:** `viamdemo:kettle-cycle-test:force-sensor`
+
+**Configuration attributes:**
+```json
+{
+  "load_cell": "adc-sensor",
+  "force_key": "value",
+  "sample_rate_hz": 50,
+  "buffer_size": 100,
+  "zero_threshold": 5.0,
+  "capture_timeout_ms": 10000
+}
+```
+
+Configuration fields:
+- `load_cell` (optional) - Name of ADC sensor component to read force values from. If omitted, uses internal mock reader.
+- `force_key` (optional) - Key in sensor readings map containing force value, defaults to "value"
+- `sample_rate_hz` (optional) - Force sampling rate, defaults to 50 Hz
+- `buffer_size` (optional) - Maximum samples to retain, defaults to 100
+- `zero_threshold` (optional) - Readings below this are considered "zero" (kettle not in contact), defaults to 5.0
+- `capture_timeout_ms` (optional) - Timeout for capture window if end_capture not called, defaults to 10000 ms
+
+The force sensor uses a mock reader when no `load_cell` is configured. Hardware integration with MCP3008 ADC is supported via the `load_cell` dependency.
 
 ## Milestone 1: Foundation
 
@@ -118,8 +159,6 @@ The module foundation is now in place:
 - **Module structure** - how to package and deploy custom Viam functionality
 - **Resource lifecycle** - constructor, DoCommand interface, Close method
 - **Hot reload** - rapid iteration with `viam module reload-local`
-
-**Next:** Milestone 4 will add load cell data capture via MCP3008 ADC.
 
 ## Milestone 2: Arm Movement
 
@@ -255,6 +294,98 @@ When idle:
   "should_sync": false
 }
 ```
+
+## Milestone 4: Force Profile Capture
+
+The force sensor component now captures force data during the put-down phase of each cycle.
+
+**What's Working:**
+- Controller calls `start_capture` DoCommand before arm movement, `end_capture` after arm stops
+- Force sensor captures samples at configurable rate (default 50 Hz) between start/end commands
+- Waits for first non-zero reading (above threshold) before capturing to skip "air time"
+- Captures rolling buffer of force samples with configurable size (default 100 samples)
+- Reports trial metadata (trial_id, cycle_count), sample array, sample count, and max force
+- Mock force reader simulates realistic force profile: zeros while lifted, ramp on contact
+- `should_sync` field true only during active trials (when trial_id present)
+- Configurable parameters: sample_rate_hz, buffer_size, zero_threshold, capture_timeout_ms
+- `waitForArmStopped()` helper polls arm.IsMoving() to ensure clean capture window
+
+**Key Implementation Details:**
+- `/Users/apr/Developer/kettle-cycle-test-demo/force_sensor.go` - Capture state machine, `forceReader` abstraction, `samplingLoop` goroutine, DoCommand handling
+- `/Users/apr/Developer/kettle-cycle-test-demo/module.go` - Lines 165-212 (capture coordination), lines 236-257 (`waitForArmStopped()` helper)
+
+**Viam Concepts Introduced:**
+- **Wrapper component pattern** - Virtual component that transforms/enriches raw sensor data (like cropped-camera)
+- **DoCommand coordination** - Controller and sensor coordinate via DoCommand interface without circular dependencies
+- **Dependency injection** - Trial metadata passed via command parameters, not constructor
+- **Interface abstraction** - `forceReader` interface enables mock vs hardware swapping
+- **State machine** - Capture states: idle → waiting (for first non-zero) → active → idle
+- **Sensor test cards** - Viam builder UI provides test cards for verifying sensor readings without CLI
+
+**Force Sensor Readings:**
+
+Query the force sensor to see captured force profile:
+```bash
+viam machine part run --part <part_id> \
+  --method 'viam.component.sensor.v1.SensorService.GetReadings' \
+  --data '{"name": "force-sensor"}'
+```
+
+During active trial with put-down data:
+```json
+{
+  "trial_id": "trial-20260120-143052",
+  "cycle_count": 42,
+  "should_sync": true,
+  "samples": [50.0, 51.5, 53.0, 54.5, 56.0, ...],
+  "sample_count": 87,
+  "max_force": 198.5
+}
+```
+
+When idle or between put-downs:
+```json
+{
+  "trial_id": "",
+  "cycle_count": 0,
+  "should_sync": false,
+  "samples": [],
+  "sample_count": 0
+}
+```
+
+**Testing with Viam App:**
+
+The force sensor can be tested directly in the Viam app builder UI:
+1. Navigate to your machine in the Viam app
+2. Find the force-sensor component
+3. Click the test card to view live readings
+4. Start a trial with `make trial-start`
+5. Watch force profiles appear as cycles run
+
+This is much faster than using CLI commands during development.
+
+**Architecture Insight:**
+
+The force sensor demonstrates two key Viam patterns: **wrapper components** and **DoCommand coordination**.
+
+Like Viam's built-in cropped-camera (which takes a camera dependency and returns a cropped region), the force sensor wraps a raw force reader and enriches it with cycle awareness. The `forceReader` interface abstracts away hardware details, allowing a mock implementation during development and real MCP3008 ADC integration later.
+
+**DoCommand coordination** avoids circular dependencies while enabling rich interactions:
+- Controller calls force sensor's `start_capture` DoCommand, passing trial_id and cycle_count
+- Force sensor begins sampling, waiting for first non-zero reading to skip "air time"
+- Controller calls `waitForArmStopped()` to poll arm.IsMoving() until movement completes
+- Controller calls `end_capture` DoCommand to finalize the capture
+- Force sensor returns sample_count and max_force in response
+
+This pattern provides several benefits:
+- **No circular dependencies** - Controller depends on sensor, but sensor doesn't depend on controller
+- **Dependency injection** - Trial metadata comes from command parameters, not constructor
+- **Separation of concerns** - Physical sensor reading vs cycle-aware data capture
+- **Testability** - Mock reader for development, real hardware later
+- **Data quality** - Only captures relevant data (during put-down) with proper correlation tags
+
+The controller optionally declares force_sensor in its config. If configured, it coordinates capture timing; if not, cycles run without force data. This loose coupling makes both components easier to test and maintain.
 
 ## Development
 

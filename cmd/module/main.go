@@ -13,5 +13,6 @@ func main() {
 	module.ModularMain(
 		resource.APIModel{generic.API, kettlecycletest.Controller},
 		resource.APIModel{sensor.API, kettlecycletest.CycleSensor},
+		resource.APIModel{sensor.API, kettlecycletest.ForceSensor},
 	)
 }
