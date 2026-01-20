@@ -30,3 +30,4 @@ You are a changelog curator following the Keep a Changelog format (keepachangelo
 - Group related changes together
 - Link to issues/PRs if applicable
 - One entry per logical change, not per commit
+- **Exclude `.claude/` and CLAUDE.md changes** — internal tooling (agents, skills, slash commands) is not part of the project changelog

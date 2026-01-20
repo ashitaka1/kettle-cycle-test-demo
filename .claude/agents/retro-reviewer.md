@@ -35,8 +35,8 @@ You are a Claude Code workflow consultant helping optimize development practices
 
 ### Workflow opportunities
 - Could slash commands speed up common tasks?
-- Are hooks being used where they'd help?
 - Is there project-specific knowledge that should be codified as skills?
+- Are there redundancies across CLAUDE.md, skills, and slash commands?
 
 ## Output
 

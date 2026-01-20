@@ -56,12 +56,23 @@ The README has a **target outline** (in product_spec.md) and a **backlog** (belo
 
 ## Project Commands
 
+### Slash Commands
+
+| Command | Description |
+|---------|-------------|
+| `/cycle` | Execute a test cycle on the arm |
+| `/logs [keyword]` | View machine logs (optionally filtered) |
+| `/status` | Get machine/component health status |
+| `/reload` | Hot-reload module to machine |
+| `/gen-module` | Generate new Viam module scaffold |
+
 ### Viam CLI
+
 - `viam machine part run --part <part_id> --method <method> --data '{}'` — run commands against the machine
-- `viam machine part run --part <part_id> --component <name> --method DoCommand --data '{}'` — call DoCommand on a component/service
-- `viam machine logs --machine <machine_id> --count 20 --keyword <filter>` — view machine logs (machine_id from machine.json)
+- `viam machine logs --machine <machine_id> --count N` — view machine logs (uses machine_id, not part_id)
 - `viam organizations list` — list orgs and their namespaces
-- Machine config stored in `machine.json`
+
+**Limitations:** No CLI command to fetch machine config (use Viam app UI). No `--service` flag for generic services (use full gRPC method). See `viam-cli-patterns` skill for details.
 
 ### Development Commands
 - `go test ./...` — run all unit tests
@@ -70,23 +81,14 @@ The README has a **target outline** (in product_spec.md) and a **backlog** (belo
 - `make test-cycle` — trigger execute_cycle DoCommand via CLI
 
 ### Module Generation
-```bash
-viam module generate \
-  --language go \
-  --name kettle-cycle-test \
-  --public-namespace viamdemo \
-  --model-name controller \
-  --resource-subtype generic-service \
-  --visibility private
-```
+
+Use `/gen-module <subtype> <model_name>` slash command. Tips:
 - Use `generic-service` for logic/orchestration, `generic-component` for hardware
 - `--public-namespace` must match your Viam org's namespace
 
 ### Hot Reload Deployment
-```bash
-viam module reload-local --part-id <part_id from machine.json>
-```
-Builds, packages, uploads via shell service, and restarts the module on the target machine.
+
+Use `/reload` or `make reload-module`. Builds, packages, uploads via shell service, and restarts the module on the target machine.
 
 ### TODO: Machine Config Sync
 Create a CLI tool/script to pull current machine config from Viam and store in repo, so machine construction is captured in version control.
@@ -104,14 +106,15 @@ Create a CLI tool/script to pull current machine config from Viam and store in r
 4. Run tests and get user's sign-off
 5. Implement feature
 
-### Before Committing
-The pre-commit hook (`.claude/hooks/pre-commit.md`) automates:
-1. Running tests
-2. Running docs-updater agent
-3. Running changelog-updater agent
-4. Staging doc changes
+### Committing Changes
 
-Just commit — the hook handles the rest.
+When asked to commit:
+1. Run tests: `go test ./...`
+2. If tests fail, abort and report
+3. Run `docs-updater` agent
+4. Run `changelog-updater` agent
+5. Stage doc changes
+6. Execute `git commit`
 
 ### Completing Work
 1. Merge branch to main (solo) or open PR (collaborative)
@@ -133,6 +136,13 @@ Just commit — the hook handles the rest.
 - **Fix:** Ensure the API in machine config matches the module registration:
   - `rdk:service:generic` → use `generic-service` subtype, `RegisterService()` in code
   - `rdk:component:generic` → use `generic-component` subtype, `RegisterComponent()` in code
+
+### Debugging Workflow
+
+1. **Check if module is healthy:** `/status`
+2. **View recent errors:** `/logs error`
+3. **Test the cycle:** `/cycle`
+4. **View all logs:** `/logs`
 
 ## Reference
 
