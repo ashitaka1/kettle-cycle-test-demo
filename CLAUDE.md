@@ -65,7 +65,11 @@ The README has a **target outline** (in product_spec.md) and a **backlog** (belo
 
 | Command | Description |
 |---------|-------------|
-| `/cycle` | Execute a test cycle on the arm |
+| `/start-feature <name>` | Create and switch to a feature branch |
+| `/cycle` | Execute a single test cycle on the arm |
+| `/trial-start` | Start continuous trial (background cycling) |
+| `/trial-stop` | Stop active trial, return cycle count |
+| `/trial-status` | Check trial status and cycle count |
 | `/logs [keyword]` | View machine logs (optionally filtered) |
 | `/status` | Get machine/component health status |
 | `/reload` | Hot-reload module to machine |
@@ -104,7 +108,7 @@ Create a CLI tool/script to pull current machine config from Viam and store in r
 ## Development Workflow
 
 ### Starting Work
-1. Create a feature branch: `git checkout -b feature/<milestone-or-feature-name>`
+1. Use `/start-feature <name>` to create and switch to a feature branch
 2. Never commit directly to main
 
 ### Planning Phase
@@ -115,8 +119,9 @@ When entering plan mode for implementation work:
    - Setup/preconditions
    - Action
    - Expected result
-3. Run `test-scrutinizer` agent on the test plan
-4. Get user approval on the complete plan (including tests)
+3. **Delegate to `test-scrutinizer` agent** — pass the full plan for review
+4. Address any issues raised by test-scrutinizer
+5. Get user approval on the complete plan (including tests)
 
 ### Implementation Phase
 1. Write tests according to approved plan
@@ -135,8 +140,10 @@ When asked to commit:
 6. Execute `git commit`
 
 ### Completing Work
-1. Merge branch to main (solo) or open PR (collaborative)
-2. Use `retro-reviewer` agent to review Claude Code usage and suggest workflow improvements
+1. **Delegate to `completion-checker` agent** — verify branch is ready to merge
+2. Address any blocking issues
+3. Merge branch to main (solo) or open PR (collaborative)
+4. Use `retro-reviewer` agent periodically to review Claude Code usage and suggest improvements
 
 ## Troubleshooting
 
