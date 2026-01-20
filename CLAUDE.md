@@ -81,6 +81,10 @@ Create a CLI tool/script to pull current machine config from Viam and store in r
 
 ## Development Workflow
 
+### Starting Work
+1. Create a feature branch: `git checkout -b feature/<milestone-or-feature-name>`
+2. Never commit directly to main
+
 ### Writing Tests
 1. Write tests
 2. Run `test-scrutinizer` agent to review for quality and meaningful coverage
@@ -93,8 +97,9 @@ Create a CLI tool/script to pull current machine config from Viam and store in r
 3. Use `changelog-updater` agent to update changelog.md
 4. Commit
 
-### After Each Milestone
-- Use `retro-reviewer` agent to review Claude Code usage and suggest workflow improvements
+### Completing Work
+1. Merge branch to main (solo) or open PR (collaborative)
+2. Use `retro-reviewer` agent to review Claude Code usage and suggest workflow improvements
 
 ## Reference
 
