@@ -34,6 +34,7 @@ func (cfg *SensorConfig) Validate(path string) ([]string, []string, error) {
 
 type stateProvider interface {
 	GetState() map[string]interface{}
+	GetSamplingPhase() string
 }
 
 type cycleSensor struct {

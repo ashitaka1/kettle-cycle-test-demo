@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"go.viam.com/rdk/components/arm"
+	"go.viam.com/rdk/components/sensor"
 	toggleswitch "go.viam.com/rdk/components/switch"
 	"go.viam.com/rdk/logging"
 	"go.viam.com/rdk/resource"
@@ -27,6 +28,7 @@ type Config struct {
 	Arm              string `json:"arm"`
 	RestingPosition  string `json:"resting_position"`
 	PourPrepPosition string `json:"pour_prep_position"`
+	ForceSensor      string `json:"force_sensor,omitempty"`
 }
 
 type trialState struct {
@@ -47,7 +49,11 @@ func (cfg *Config) Validate(path string) ([]string, []string, error) {
 	if cfg.PourPrepPosition == "" {
 		return nil, nil, fmt.Errorf("%s: pour_prep_position is required", path)
 	}
-	return []string{cfg.Arm, cfg.RestingPosition, cfg.PourPrepPosition}, nil, nil
+	deps := []string{cfg.Arm, cfg.RestingPosition, cfg.PourPrepPosition}
+	if cfg.ForceSensor != "" {
+		deps = append(deps, cfg.ForceSensor)
+	}
+	return deps, nil, nil
 }
 
 type kettleCycleTestController struct {
@@ -57,15 +63,17 @@ type kettleCycleTestController struct {
 	logger logging.Logger
 	cfg    *Config
 
-	arm      arm.Arm
-	resting  toggleswitch.Switch
-	pourPrep toggleswitch.Switch
+	arm         arm.Arm
+	resting     toggleswitch.Switch
+	pourPrep    toggleswitch.Switch
+	forceSensor sensor.Sensor // optional, may be nil
 
 	cancelCtx  context.Context
 	cancelFunc func()
 
-	mu          sync.Mutex
-	activeTrial *trialState
+	mu            sync.Mutex
+	activeTrial   *trialState
+	samplingPhase string // "", "put_down"
 }
 
 func newKettleCycleTestController(ctx context.Context, deps resource.Dependencies, rawConf resource.Config, logger logging.Logger) (resource.Resource, error) {
@@ -94,17 +102,27 @@ func NewController(ctx context.Context, deps resource.Dependencies, name resourc
 		return nil, fmt.Errorf("getting pour_prep position switch: %w", err)
 	}
 
+	var fs sensor.Sensor
+	if conf.ForceSensor != "" {
+		fs, err = sensor.FromDependencies(deps, conf.ForceSensor)
+		if err != nil {
+			return nil, fmt.Errorf("getting force sensor: %w", err)
+		}
+		logger.Infof("controller using force sensor: %s", conf.ForceSensor)
+	}
+
 	cancelCtx, cancelFunc := context.WithCancel(context.Background())
 
 	s := &kettleCycleTestController{
-		name:       name,
-		logger:     logger,
-		cfg:        conf,
-		arm:        a,
-		resting:    resting,
-		pourPrep:   pourPrep,
-		cancelCtx:  cancelCtx,
-		cancelFunc: cancelFunc,
+		name:        name,
+		logger:      logger,
+		cfg:         conf,
+		arm:         a,
+		resting:     resting,
+		pourPrep:    pourPrep,
+		forceSensor: fs,
+		cancelCtx:   cancelCtx,
+		cancelFunc:  cancelFunc,
 	}
 	return s, nil
 }
@@ -144,9 +162,63 @@ func (s *kettleCycleTestController) handleExecuteCycle(ctx context.Context) (map
 	case <-time.After(1 * time.Second):
 	}
 
+	// Signal start of put-down phase for force sampling
+	s.mu.Lock()
+	s.samplingPhase = "put_down"
+	s.mu.Unlock()
+
+	// Start force capture if sensor is configured
+	if s.forceSensor != nil {
+		s.mu.Lock()
+		captureCmd := map[string]interface{}{"command": "start_capture"}
+		if s.activeTrial != nil {
+			captureCmd["trial_id"] = s.activeTrial.trialID
+			captureCmd["cycle_count"] = s.activeTrial.cycleCount
+		}
+		s.mu.Unlock()
+
+		_, err := s.forceSensor.DoCommand(ctx, captureCmd)
+		if err != nil {
+			s.logger.Warnf("failed to start force capture: %v", err)
+		}
+	}
+
 	if err := s.resting.SetPosition(ctx, 2, nil); err != nil {
+		s.mu.Lock()
+		s.samplingPhase = ""
+		s.mu.Unlock()
+		// Try to end capture on error
+		if s.forceSensor != nil {
+			s.forceSensor.DoCommand(ctx, map[string]interface{}{"command": "end_capture"})
+		}
 		return nil, fmt.Errorf("returning to resting position: %w", err)
 	}
+
+	// Wait for arm to stop moving
+	if err := s.waitForArmStopped(ctx); err != nil {
+		s.logger.Warnf("error waiting for arm to stop: %v", err)
+	}
+
+	// End force capture
+	var captureResult map[string]interface{}
+	if s.forceSensor != nil {
+		var err error
+		captureResult, err = s.forceSensor.DoCommand(ctx, map[string]interface{}{"command": "end_capture"})
+		if err != nil {
+			s.logger.Warnf("failed to end force capture: %v", err)
+		} else {
+			s.logger.Infof("force capture: %v", captureResult)
+		}
+	}
+
+	// Signal end of put-down phase
+	s.mu.Lock()
+	s.samplingPhase = ""
+	if s.activeTrial != nil {
+		s.activeTrial.cycleCount++
+		s.activeTrial.lastCycleAt = time.Now()
+	}
+	s.mu.Unlock()
 
 	select {
 	case <-ctx.Done():
@@ -154,15 +226,34 @@ func (s *kettleCycleTestController) handleExecuteCycle(ctx context.Context) (map
 	case <-time.After(1 * time.Second):
 	}
 
-	// Update cycle count if trial is active
-	s.mu.Lock()
-	if s.activeTrial != nil {
-		s.activeTrial.cycleCount++
-		s.activeTrial.lastCycleAt = time.Now()
+	result := map[string]interface{}{"status": "completed"}
+	if captureResult != nil {
+		result["force_capture"] = captureResult
 	}
-	s.mu.Unlock()
+	return result, nil
+}
 
-	return map[string]interface{}{"status": "completed"}, nil
+func (s *kettleCycleTestController) waitForArmStopped(ctx context.Context) error {
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+
+	timeout := time.After(10 * time.Second)
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timeout:
+			return fmt.Errorf("timeout waiting for arm to stop")
+		case <-ticker.C:
+			moving, err := s.arm.IsMoving(ctx)
+			if err != nil {
+				return fmt.Errorf("checking arm movement: %w", err)
+			}
+			if !moving {
+				return nil
+			}
+		}
+	}
 }
 
 func (s *kettleCycleTestController) handleStart() (map[string]interface{}, error) {
@@ -256,8 +347,13 @@ func (s *kettleCycleTestController) GetState() map[string]interface{} {
 	}
 }
 
+func (s *kettleCycleTestController) GetSamplingPhase() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.samplingPhase
+}
+
 func (s *kettleCycleTestController) Close(context.Context) error {
-	// Put close code here
 	s.cancelFunc()
 	return nil
 }

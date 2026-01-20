@@ -9,12 +9,16 @@ import (
 	"go.viam.com/rdk/resource"
 )
 
-type mockStateProvider struct {
+type cycleSensorMockProvider struct {
 	state map[string]interface{}
 }
 
-func (m *mockStateProvider) GetState() map[string]interface{} {
+func (m *cycleSensorMockProvider) GetState() map[string]interface{} {
 	return m.state
+}
+
+func (m *cycleSensorMockProvider) GetSamplingPhase() string {
+	return ""
 }
 
 func TestSensor_GetReadings_ReturnsControllerState(t *testing.T) {
@@ -28,7 +32,7 @@ func TestSensor_GetReadings_ReturnsControllerState(t *testing.T) {
 		"last_cycle_at": "2026-01-20T14:32:00Z",
 	}
 
-	mock := &mockStateProvider{state: expectedState}
+	mock := &cycleSensorMockProvider{state: expectedState}
 	sensor := &cycleSensor{
 		name:       name,
 		logger:     logger,

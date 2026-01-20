@@ -15,13 +15,16 @@
 7. Publish module publicly
 
 ### Current Milestone
-Milestone 3 complete. Trial lifecycle management with continuous cycling and data capture readiness via cycle-sensor component.
+Milestone 4 complete. Force sensor captures load cell data during put-down phase via DoCommand coordination pattern.
 
 *(Keep this updated whenever a project phase or milestone advances.)*
 
 ## Open Questions
 - How will we detect a real break? (mechanical design)
 - How will we fake a break for testing? (removable patch concept)
+
+## Technical Debt
+- `cycleLoop()` in module.go ignores errors from `handleExecuteCycle()` - should log failures during continuous trials
 
 # Implementation Notes
 - Use `LinearConstraint` for level kettle movement; highlight in README as Viam feature
@@ -33,7 +36,14 @@ Milestone 3 complete. Trial lifecycle management with continuous cycling and dat
 - Trial lifecycle: `start` begins continuous cycling in background goroutine, `stop` ends trial and returns count
 - Cycle-sensor component wraps controller state via `stateProvider` interface for Viam data capture
 - `should_sync` field enables conditional data capture (only sync when trial is active)
-- Service dependencies work like component dependencies; sensor declares controller as full resource name 
+- Service dependencies work like component dependencies; sensor declares controller as full resource name
+- Force sensor wraps `forceReader` interface (mock or sensorForceReader) for hardware abstraction
+- Controller calls force sensor's start_capture/end_capture DoCommands, passing trial metadata via parameters
+- DoCommand coordination pattern avoids circular dependencies while enabling rich coordination
+- Force sensor state machine: idle → waiting (for first non-zero) → active → idle
+- `waitForArmStopped()` polls arm.IsMoving() to ensure clean capture timing
+- Force sensor returns trial_id/cycle_count from start_capture params, setting should_sync accordingly
+- Viam's builder UI sensor test card lets you verify force sensor readings without CLI commands 
 
 ## Documentation
 
@@ -57,6 +67,7 @@ The README has a **target outline** (in product_spec.md) and a **backlog** (belo
 - Lesson 1 walkthrough content for Milestone 1
 - Lesson 2 walkthrough content for Milestone 2 (position-saver switches, arm as explicit dependency)
 - Lesson 3 walkthrough content for Milestone 3 (trial lifecycle, sensor wrapping service state, conditional data capture)
+- Lesson 4 walkthrough content for Milestone 4 (DoCommand coordination, wrapper component pattern, forceReader abstraction, capture state machine, waitForArmStopped timing)
 
 
 ## Project Commands
@@ -132,6 +143,15 @@ Delegate to `test-scrutinizer` agent for review. Address issues and get user app
 2. Run tests (should fail)
 3. Implement feature
 4. Run tests (should pass)
+
+### Physical Validation
+Before updating docs, verify the feature works on real hardware:
+1. Build module: `make module.tar.gz`
+2. Deploy to machine: `/reload`
+3. Verify in Viam app (sensor test cards, component status)
+4. If issues found, fix and re-run unit tests before proceeding
+
+**Why this matters:** Unit tests verify logic, but physical validation catches integration issues (config problems, dependency resolution, hardware timing). Docs should describe working behavior, not theoretical behavior.
 
 ### Committing Changes
 

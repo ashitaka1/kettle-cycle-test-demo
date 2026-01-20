@@ -18,8 +18,12 @@ func testDeps() (resource.Dependencies, *Config) {
 		RestingPosition:  "resting",
 		PourPrepPosition: "pour-prep",
 	}
+	testArm := inject.NewArm("test-arm")
+	testArm.IsMovingFunc = func(ctx context.Context) (bool, error) {
+		return false, nil
+	}
 	deps := resource.Dependencies{
-		resource.NewName(arm.API, "test-arm"):           inject.NewArm("test-arm"),
+		resource.NewName(arm.API, "test-arm"):           testArm,
 		resource.NewName(toggleswitch.API, "resting"):   inject.NewSwitch("resting"),
 		resource.NewName(toggleswitch.API, "pour-prep"): inject.NewSwitch("pour-prep"),
 	}
@@ -293,8 +297,13 @@ func TestExecuteCycle(t *testing.T) {
 			return nil
 		}
 
+		testArm := inject.NewArm("test-arm")
+		testArm.IsMovingFunc = func(ctx context.Context) (bool, error) {
+			return false, nil
+		}
+
 		deps := resource.Dependencies{
-			resource.NewName(arm.API, "test-arm"):           inject.NewArm("test-arm"),
+			resource.NewName(arm.API, "test-arm"):           testArm,
 			resource.NewName(toggleswitch.API, "resting"):   restingSwitch,
 			resource.NewName(toggleswitch.API, "pour-prep"): pourPrepSwitch,
 		}
@@ -350,8 +359,13 @@ func TestExecuteCycle(t *testing.T) {
 			return errors.New("switch error")
 		}
 
+		testArm := inject.NewArm("test-arm")
+		testArm.IsMovingFunc = func(ctx context.Context) (bool, error) {
+			return false, nil
+		}
+
 		deps := resource.Dependencies{
-			resource.NewName(arm.API, "test-arm"):           inject.NewArm("test-arm"),
+			resource.NewName(arm.API, "test-arm"):           testArm,
 			resource.NewName(toggleswitch.API, "resting"):   restingSwitch,
 			resource.NewName(toggleswitch.API, "pour-prep"): pourPrepSwitch,
 		}
@@ -397,8 +411,13 @@ func TestExecuteCycle(t *testing.T) {
 			return nil
 		}
 
+		testArm := inject.NewArm("test-arm")
+		testArm.IsMovingFunc = func(ctx context.Context) (bool, error) {
+			return false, nil
+		}
+
 		deps := resource.Dependencies{
-			resource.NewName(arm.API, "test-arm"):           inject.NewArm("test-arm"),
+			resource.NewName(arm.API, "test-arm"):           testArm,
 			resource.NewName(toggleswitch.API, "resting"):   restingSwitch,
 			resource.NewName(toggleswitch.API, "pour-prep"): pourPrepSwitch,
 		}
@@ -424,6 +443,149 @@ func TestExecuteCycle(t *testing.T) {
 		// Pour prep should have been called before resting failed
 		if len(pourPrepCalls) != 1 {
 			t.Errorf("pour_prep switch should have been called once, got %v", len(pourPrepCalls))
+		}
+	})
+}
+
+func TestGetSamplingPhase(t *testing.T) {
+	t.Run("returns empty when idle", func(t *testing.T) {
+		logger := logging.NewTestLogger(t)
+		name := resource.NewName(resource.APINamespaceRDK.WithServiceType("generic"), "test")
+		deps, cfg := testDeps()
+
+		ctrl, err := NewController(context.Background(), deps, name, cfg, logger)
+		if err != nil {
+			t.Fatalf("NewController failed: %v", err)
+		}
+
+		kctrl := ctrl.(*kettleCycleTestController)
+		phase := kctrl.GetSamplingPhase()
+		if phase != "" {
+			t.Errorf("expected empty phase, got %q", phase)
+		}
+	})
+
+	t.Run("implements stateProvider interface", func(t *testing.T) {
+		logger := logging.NewTestLogger(t)
+		name := resource.NewName(resource.APINamespaceRDK.WithServiceType("generic"), "test")
+		deps, cfg := testDeps()
+
+		ctrl, err := NewController(context.Background(), deps, name, cfg, logger)
+		if err != nil {
+			t.Fatalf("NewController failed: %v", err)
+		}
+
+		// Type assert to stateProvider to verify interface compliance
+		provider, ok := ctrl.(stateProvider)
+		if !ok {
+			t.Fatal("controller does not implement stateProvider")
+		}
+
+		// Verify both interface methods work
+		_ = provider.GetState()
+		_ = provider.GetSamplingPhase()
+	})
+
+	t.Run("clears phase after cycle completes", func(t *testing.T) {
+		logger := logging.NewTestLogger(t)
+		name := resource.NewName(resource.APINamespaceRDK.WithServiceType("generic"), "test")
+
+		restingSwitch := inject.NewSwitch("resting")
+		restingSwitch.SetPositionFunc = func(ctx context.Context, position uint32, extra map[string]interface{}) error {
+			return nil
+		}
+
+		pourPrepSwitch := inject.NewSwitch("pour-prep")
+		pourPrepSwitch.SetPositionFunc = func(ctx context.Context, position uint32, extra map[string]interface{}) error {
+			return nil
+		}
+
+		testArm := inject.NewArm("test-arm")
+		testArm.IsMovingFunc = func(ctx context.Context) (bool, error) {
+			return false, nil
+		}
+
+		deps := resource.Dependencies{
+			resource.NewName(arm.API, "test-arm"):           testArm,
+			resource.NewName(toggleswitch.API, "resting"):   restingSwitch,
+			resource.NewName(toggleswitch.API, "pour-prep"): pourPrepSwitch,
+		}
+
+		cfg := &Config{
+			Arm:              "test-arm",
+			RestingPosition:  "resting",
+			PourPrepPosition: "pour-prep",
+		}
+
+		ctrl, err := NewController(context.Background(), deps, name, cfg, logger)
+		if err != nil {
+			t.Fatalf("NewController failed: %v", err)
+		}
+
+		kctrl := ctrl.(*kettleCycleTestController)
+
+		// Execute a cycle
+		_, err = kctrl.DoCommand(context.Background(), map[string]interface{}{
+			"command": "execute_cycle",
+		})
+		if err != nil {
+			t.Fatalf("execute_cycle failed: %v", err)
+		}
+
+		// After cycle, phase should be cleared
+		phase := kctrl.GetSamplingPhase()
+		if phase != "" {
+			t.Errorf("expected empty phase after cycle, got %q", phase)
+		}
+	})
+
+	t.Run("clears phase on resting switch error", func(t *testing.T) {
+		logger := logging.NewTestLogger(t)
+		name := resource.NewName(resource.APINamespaceRDK.WithServiceType("generic"), "test")
+
+		restingSwitch := inject.NewSwitch("resting")
+		restingSwitch.SetPositionFunc = func(ctx context.Context, position uint32, extra map[string]interface{}) error {
+			return errors.New("switch error")
+		}
+
+		pourPrepSwitch := inject.NewSwitch("pour-prep")
+		pourPrepSwitch.SetPositionFunc = func(ctx context.Context, position uint32, extra map[string]interface{}) error {
+			return nil
+		}
+
+		testArm := inject.NewArm("test-arm")
+		testArm.IsMovingFunc = func(ctx context.Context) (bool, error) {
+			return false, nil
+		}
+
+		deps := resource.Dependencies{
+			resource.NewName(arm.API, "test-arm"):           testArm,
+			resource.NewName(toggleswitch.API, "resting"):   restingSwitch,
+			resource.NewName(toggleswitch.API, "pour-prep"): pourPrepSwitch,
+		}
+
+		cfg := &Config{
+			Arm:              "test-arm",
+			RestingPosition:  "resting",
+			PourPrepPosition: "pour-prep",
+		}
+
+		ctrl, err := NewController(context.Background(), deps, name, cfg, logger)
+		if err != nil {
+			t.Fatalf("NewController failed: %v", err)
+		}
+
+		kctrl := ctrl.(*kettleCycleTestController)
+
+		// Execute cycle - will fail on resting switch
+		_, _ = kctrl.DoCommand(context.Background(), map[string]interface{}{
+			"command": "execute_cycle",
+		})
+
+		// Phase should still be cleared even on error
+		phase := kctrl.GetSamplingPhase()
+		if phase != "" {
+			t.Errorf("expected empty phase after error, got %q", phase)
 		}
 	})
 }

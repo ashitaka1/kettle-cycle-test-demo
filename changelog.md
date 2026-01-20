@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Milestone 4: Load Cell Integration for Put-Down Force Capture
+
+**Added**
+- Force sensor component (`viamdemo:kettle-cycle-test:force-sensor`) wrapping physical load cells or mock data source
+- `start_capture` and `end_capture` DoCommands for controlling capture windows during cycle execution
+- Trial metadata (trial_id, cycle_count) passed via dependency injection pattern to force sensor
+- Three-state capture lifecycle: idle → waiting (for first non-zero reading) → capturing → idle
+- Configurable capture parameters: sample_rate_hz (default 50), buffer_size (default 100), zero_threshold (default 5.0), capture_timeout_ms (default 10000)
+- Mock force reader simulating realistic force profile: near-zero while lifted, ramp from 50-200 during contact
+- `sensorForceReader` wrapper for integrating physical Viam sensor components via configurable force_key
+- `waitForArmStopped` helper ensures capture ends precisely when arm stops moving
+- Force sensor readings include trial_id, cycle_count, samples array, sample_count, max_force, capture_state, and should_sync flag
+- `GetSamplingPhase()` method to stateProvider interface exposing "put_down" phase for sensor coordination
+
+**Changed**
+- Controller integrates force sensor as optional dependency
+- Execute_cycle triggers start_capture before resting movement, end_capture after arm stops
+- Controller tracks samplingPhase field ("put_down" during capture window, empty otherwise)
+- Cycle completion returns force_capture results when sensor is configured
+
 ### Milestone 3: Cycle Records and CLI Control
 
 **Added**
