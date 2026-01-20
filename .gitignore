@@ -6,7 +6,7 @@ machine.json
 .env.local
 .env*.local
 
-# Go
+# Go binaries and build artifacts
 *.exe
 *.exe~
 *.dll
@@ -14,6 +14,13 @@ machine.json
 *.dylib
 *.test
 *.out
+*~
+bin/
+*.tar.gz
+
+# Go workspace
+go.work
+go.work.sum
 
 # IDE
 .idea/

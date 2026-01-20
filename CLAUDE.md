@@ -15,7 +15,7 @@
 7. Publish module publicly
 
 ### Current Milestone
-Currently in pre-planning, step 6 (Develop).
+Milestone 1 complete. Ready to begin Milestone 2 (arm movement between saved positions).
 
 *(Keep this updated whenever a project phase or milestone advances.)*
 
@@ -44,7 +44,11 @@ The README has a **target outline** (in product_spec.md) and a **backlog** (belo
 3. Add new backlog items for content that requires future work (e.g., video, screenshots of UI that doesn't exist yet)
 
 **Backlog** (content waiting on future implementation):
-- *(empty — no code yet)*
+- Demo video/gif showing module in action
+- Hardware setup section (parts list, wiring diagrams, 3D-printed fixture details)
+- Architecture diagram showing component relationships
+- Screenshots of Viam app configuration
+- Lesson 1 walkthrough content for Milestone 1
 
 
 ## Project Commands
@@ -53,8 +57,44 @@ The README has a **target outline** (in product_spec.md) and a **backlog** (belo
 - `viam machine part run` — run commands against the machine
 - Machine config stored in `machine.json`
 
+### Module Generation
+```bash
+viam module generate \
+  --language go \
+  --name kettle-cycle-test \
+  --public-namespace viamdemo \
+  --model-name controller \
+  --resource-subtype generic-service \
+  --visibility private
+```
+- Use `generic-service` for logic/orchestration, `generic-component` for hardware
+- `--public-namespace` must match your Viam org's namespace
+
+### Hot Reload Deployment
+```bash
+viam module reload-local --part-id <part_id from machine.json>
+```
+Builds, packages, uploads via shell service, and restarts the module on the target machine.
+
 ### TODO: Machine Config Sync
-Create a CLI tool/script to pull current machine config from Viam and store in repo, so machine construction is captured in version control. 
+Create a CLI tool/script to pull current machine config from Viam and store in repo, so machine construction is captured in version control.
+
+## Development Workflow
+
+### Writing Tests
+1. Write tests
+2. Run `test-scrutinizer` agent to review for quality and meaningful coverage
+3. Present tests to user for approval
+4. Implement feature
+
+### Before Committing
+1. Run tests: `go test ./...`
+2. Use `docs-updater` agent to update README and CLAUDE.md
+3. Use `changelog-updater` agent to update changelog.md
+4. Commit
+
+### After Each Milestone
+- Use `retro-reviewer` agent to review Claude Code usage and suggest workflow improvements
 
 ## Reference
 
