@@ -145,5 +145,52 @@ README.md is maintained as a learning resource throughout development. Target au
 - Bonus round features
 - Links to Viam docs 
 
+# Milestone Architecture Decisions
+
+## Milestone 5: Camera Snapshot with Tags
+
+### Approach
+Controller captures camera image at pour-prep position and uploads directly to Viam dataset with per-image tags using `datamanager.UploadImageToDatasets()`.
+
+### Key Decisions
+
+**Upload mechanism:** Use Data Management Service API (`datamanager.UploadImageToDatasets`), not Data Client API.
+- Data Management Service is accessible from module without API keys
+- Supports `tags []string` parameter for per-image tagging
+- Requires pre-existing dataset (dataset_id in config)
+
+**Dataset lifecycle:** Managed via Viam CLI, not programmatically.
+- `viam dataset create/list/delete` commands handle lifecycle
+- Add Makefile targets and/or slash commands as convenience wrappers
+- Future UI/client app would handle this; CLI is sufficient for demo
+
+**Tagging strategy:** Per-image tags include:
+- `trial_id:<id>` — correlates with trial
+- `cycle_count:<n>` — correlates with specific cycle
+- Additional tags as needed (e.g., `phase:pour_prep`)
+
+**Capture timing:** After arm reaches pour-prep position and stops moving.
+- Use existing `waitForArmStopped()` pattern
+- Capture before put-down phase begins
+
+**Error handling - strict, not graceful:**
+- If camera or data_manager configured but unavailable → error, block trial start
+- Cycle testing without essential data capture is a system error, not a degraded mode
+- This is a business rule: incomplete data capture defeats the purpose
+
+**Configuration additions:**
+```json
+{
+  "camera": "webcam-1",
+  "data_manager": "data_manager-1",
+  "dataset_id": "abc123-dataset-id"
+}
+```
+
+### Admin Commands (Makefile/Slash)
+Convenience wrappers around Viam CLI for dataset management:
+- `create-dataset` / `/create-dataset <name>`
+- `list-datasets` / `/list-datasets`
+
 # Development Process
 Collaborative TDD: Claude writes tests, user revises and approves, then implementation proceeds. No implementation without approved tests. All docs kept up to date.
