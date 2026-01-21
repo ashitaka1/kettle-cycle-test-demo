@@ -8,7 +8,7 @@ description: Common Viam RDK patterns for Go module development
 ```go
 func NewController(ctx context.Context, deps resource.Dependencies, name resource.Name, conf *Config, logger logging.Logger) (resource.Resource, error) {
     // Access a dependency declared in Validate()
-    arm, err := arm.FromDependencies(deps, conf.ArmName)
+    arm, err := arm.FromProvider(deps, conf.ArmName)
     if err != nil {
         return nil, fmt.Errorf("failed to get arm %q: %w", conf.ArmName, err)
     }
