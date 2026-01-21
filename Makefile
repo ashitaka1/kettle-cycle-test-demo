@@ -75,3 +75,14 @@ trial-status:
 	viam machine part run --part $(PART_ID) \
 		--method 'viam.service.generic.v1.GenericService.DoCommand' \
 		--data '{"name": "cycle-tester", "command": {"command": "status"}}'
+
+# One-time pose conversion: get current arm end position as Cartesian coordinates
+# Usage: Move arm to desired position (via teleop/teach pendant), then run this target
+# Output can be used for pour_prep_target config
+ARM_NAME ?= lite6
+get-arm-pose:
+	@echo "Getting current arm end position..."
+	@viam machine part run --part $(PART_ID) \
+		--method 'viam.component.arm.v1.ArmService.GetEndPosition' \
+		--data '{"name": "$(ARM_NAME)"}' 2>/dev/null | \
+		jq '{x: .pose.x, y: .pose.y, z: .pose.z, note: "Use these values for pour_prep_target in config"}'

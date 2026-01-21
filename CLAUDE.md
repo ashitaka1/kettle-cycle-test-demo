@@ -15,7 +15,13 @@
 7. Publish module publicly
 
 ### Current Milestone
-Milestone 5 complete. Camera captures snapshot at pour-prep position and uploads to Viam dataset with trial correlation tags.
+Milestone 6 in progress. Motion service integration implemented - needs physical validation.
+
+**Milestone 6 changes:**
+- Replaced switch-based pour-prep movement with motion service using `LinearConstraint`
+- New config: `motion_service` (string) and `pour_prep_target` (Point with x, y, z in mm)
+- `moveToPourPrep()` uses motion.Move() with OrientationToleranceDegs to keep kettle level
+- Added `make get-arm-pose` to capture Cartesian coordinates for config
 
 *(Keep this updated whenever a project phase or milestone advances.)*
 

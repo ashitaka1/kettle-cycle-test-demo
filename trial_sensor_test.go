@@ -62,14 +62,12 @@ func TestTrialSensor_Constructor(t *testing.T) {
 			return false, nil
 		}
 		deps := resource.Dependencies{
-			resource.NewName(arm.API, "test-arm"):           testArm,
-			resource.NewName(toggleswitch.API, "resting"):   inject.NewSwitch("resting"),
-			resource.NewName(toggleswitch.API, "pour-prep"): inject.NewSwitch("pour-prep"),
+			resource.NewName(arm.API, "test-arm"):         testArm,
+			resource.NewName(toggleswitch.API, "resting"): inject.NewSwitch("resting"),
 		}
 		cfg := &Config{
-			Arm:              "test-arm",
-			RestingPosition:  "resting",
-			PourPrepPosition: "pour-prep",
+			Arm:             "test-arm",
+			RestingPosition: "resting",
 		}
 		ctrlName := resource.NewName(resource.APINamespaceRDK.WithServiceType("generic"), "test-controller")
 		ctrl, err := NewController(context.Background(), deps, ctrlName, cfg, logger)
@@ -108,14 +106,12 @@ func TestTrialSensor_ReadingsMatchesControllerState(t *testing.T) {
 		return false, nil
 	}
 	deps := resource.Dependencies{
-		resource.NewName(arm.API, "test-arm"):           testArm,
-		resource.NewName(toggleswitch.API, "resting"):   inject.NewSwitch("resting"),
-		resource.NewName(toggleswitch.API, "pour-prep"): inject.NewSwitch("pour-prep"),
+		resource.NewName(arm.API, "test-arm"):         testArm,
+		resource.NewName(toggleswitch.API, "resting"): inject.NewSwitch("resting"),
 	}
 	cfg := &Config{
-		Arm:              "test-arm",
-		RestingPosition:  "resting",
-		PourPrepPosition: "pour-prep",
+		Arm:             "test-arm",
+		RestingPosition: "resting",
 	}
 	ctrlName := resource.NewName(resource.APINamespaceRDK.WithServiceType("generic"), "test-controller")
 	ctrl, err := NewController(context.Background(), deps, ctrlName, cfg, logger)

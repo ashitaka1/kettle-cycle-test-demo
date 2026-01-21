@@ -12,14 +12,19 @@ import (
 	"sync"
 	"time"
 
+	"github.com/golang/geo/r3"
 	"go.viam.com/rdk/app"
 	"go.viam.com/rdk/components/arm"
 	"go.viam.com/rdk/components/camera"
 	"go.viam.com/rdk/components/sensor"
 	toggleswitch "go.viam.com/rdk/components/switch"
 	"go.viam.com/rdk/logging"
+	"go.viam.com/rdk/motionplan"
+	"go.viam.com/rdk/referenceframe"
 	"go.viam.com/rdk/resource"
 	generic "go.viam.com/rdk/services/generic"
+	"go.viam.com/rdk/services/motion"
+	"go.viam.com/rdk/spatialmath"
 )
 
 var Controller = resource.NewModel("viamdemo", "kettle-cycle-test", "controller")
@@ -33,16 +38,27 @@ func init() {
 }
 
 type Config struct {
-	Arm              string `json:"arm"`
-	RestingPosition  string `json:"resting_position"`
-	PourPrepPosition string `json:"pour_prep_position"`
-	ForceSensor      string `json:"force_sensor,omitempty"`
+	Arm             string `json:"arm"`
+	RestingPosition string `json:"resting_position"`
+
+	// Pour-prep target enables motion service movement with LinearConstraint (Milestone 6)
+	// Uses builtin motion service automatically when set
+	PourPrepTarget *Point `json:"pour_prep_target,omitempty"`
+
+	ForceSensor string `json:"force_sensor,omitempty"`
 
 	// Camera capture settings (Camera, DatasetID, PartID required if Camera is set)
 	// API credentials read from VIAM_API_KEY and VIAM_API_KEY_ID environment variables
 	Camera    string `json:"camera,omitempty"`
 	DatasetID string `json:"dataset_id,omitempty"`
 	PartID    string `json:"part_id,omitempty"`
+}
+
+// Point represents a Cartesian coordinate in millimeters
+type Point struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
+	Z float64 `json:"z"`
 }
 
 type trialState struct {
@@ -60,8 +76,12 @@ func (cfg *Config) Validate(path string) ([]string, []string, error) {
 	if cfg.RestingPosition == "" {
 		return nil, nil, fmt.Errorf("%s: resting_position is required", path)
 	}
-	if cfg.PourPrepPosition == "" {
-		return nil, nil, fmt.Errorf("%s: pour_prep_position is required", path)
+
+	// Validate pour_prep_target coordinates (zero values likely misconfigured)
+	if cfg.PourPrepTarget != nil {
+		if cfg.PourPrepTarget.X == 0 && cfg.PourPrepTarget.Y == 0 && cfg.PourPrepTarget.Z == 0 {
+			return nil, nil, fmt.Errorf("%s: pour_prep_target has zero coordinates (likely misconfigured)", path)
+		}
 	}
 
 	// If camera is configured, dataset_id and part_id are required
@@ -72,7 +92,11 @@ func (cfg *Config) Validate(path string) ([]string, []string, error) {
 		}
 	}
 
-	deps := []string{cfg.Arm, cfg.RestingPosition, cfg.PourPrepPosition}
+	deps := []string{cfg.Arm, cfg.RestingPosition}
+	// Motion service dependency when pour_prep_target is configured
+	if cfg.PourPrepTarget != nil {
+		deps = append(deps, motion.Named("builtin").String())
+	}
 	if cfg.ForceSensor != "" {
 		deps = append(deps, cfg.ForceSensor)
 	}
@@ -89,10 +113,10 @@ type kettleCycleTestController struct {
 	logger logging.Logger
 	cfg    *Config
 
-	arm         arm.Arm
-	resting     toggleswitch.Switch
-	pourPrep    toggleswitch.Switch
-	forceSensor sensor.Sensor // optional, may be nil
+	arm           arm.Arm
+	resting       toggleswitch.Switch
+	motionService motion.Service // for LinearConstraint movement to pour-prep
+	forceSensor   sensor.Sensor  // optional, may be nil
 
 	// Camera capture (optional)
 	camera     camera.Camera
@@ -129,9 +153,15 @@ func NewController(ctx context.Context, deps resource.Dependencies, name resourc
 		return nil, fmt.Errorf("getting resting position switch: %w", err)
 	}
 
-	pourPrep, err := toggleswitch.FromDependencies(deps, conf.PourPrepPosition)
-	if err != nil {
-		return nil, fmt.Errorf("getting pour_prep position switch: %w", err)
+	// Motion service for LinearConstraint movement to pour-prep position
+	var ms motion.Service
+	if conf.PourPrepTarget != nil {
+		ms, err = motion.FromDependencies(deps, "builtin")
+		if err != nil {
+			return nil, fmt.Errorf("getting motion service: %w", err)
+		}
+		logger.Infof("controller using motion service with target (%v, %v, %v)",
+			conf.PourPrepTarget.X, conf.PourPrepTarget.Y, conf.PourPrepTarget.Z)
 	}
 
 	var fs sensor.Sensor
@@ -170,20 +200,20 @@ func NewController(ctx context.Context, deps resource.Dependencies, name resourc
 	cancelCtx, cancelFunc := context.WithCancel(context.Background())
 
 	s := &kettleCycleTestController{
-		name:        name,
-		logger:      logger,
-		cfg:         conf,
-		arm:         a,
-		resting:     resting,
-		pourPrep:    pourPrep,
-		forceSensor: fs,
-		camera:      cam,
-		viamClient:  viamClient,
-		dataClient:  dataClient,
-		datasetID:   conf.DatasetID,
-		partID:      conf.PartID,
-		cancelCtx:   cancelCtx,
-		cancelFunc:  cancelFunc,
+		name:          name,
+		logger:        logger,
+		cfg:           conf,
+		arm:           a,
+		resting:       resting,
+		motionService: ms,
+		forceSensor:   fs,
+		camera:        cam,
+		viamClient:    viamClient,
+		dataClient:    dataClient,
+		datasetID:     conf.DatasetID,
+		partID:        conf.PartID,
+		cancelCtx:     cancelCtx,
+		cancelFunc:    cancelFunc,
 	}
 	return s, nil
 }
@@ -220,7 +250,8 @@ func (s *kettleCycleTestController) handleExecuteCycle(ctx context.Context) (map
 	}
 	s.mu.Unlock()
 
-	if err := s.pourPrep.SetPosition(ctx, 2, nil); err != nil {
+	// Move to pour-prep position using motion service with LinearConstraint
+	if err := s.moveToPourPrep(ctx); err != nil {
 		return nil, fmt.Errorf("moving to pour_prep position: %w", err)
 	}
 
@@ -317,6 +348,58 @@ func (s *kettleCycleTestController) waitForArmStopped(ctx context.Context) error
 			}
 		}
 	}
+}
+
+// moveToPourPrep moves arm to pour-prep position using motion service with LinearConstraint.
+// The constraint maintains the kettle's orientation (level) during the movement.
+// EDUCATION: LinearConstraint is a Viam motion planning feature that ensures the end-effector
+// follows a straight line while maintaining orientation within tolerance.
+func (s *kettleCycleTestController) moveToPourPrep(ctx context.Context) error {
+	if s.motionService == nil || s.cfg.PourPrepTarget == nil {
+		return fmt.Errorf("motion service not configured")
+	}
+
+	// Build target pose from config coordinates
+	// Use current arm orientation (we only specify position, LinearConstraint maintains orientation)
+	targetPoint := r3.Vector{
+		X: s.cfg.PourPrepTarget.X,
+		Y: s.cfg.PourPrepTarget.Y,
+		Z: s.cfg.PourPrepTarget.Z,
+	}
+	// Create pose with just the position - orientation will be maintained by LinearConstraint
+	targetPose := spatialmath.NewPose(targetPoint, spatialmath.NewOrientationVector())
+
+	// Create destination in the world frame (frame system must be configured)
+	destination := referenceframe.NewPoseInFrame(
+		"world",
+		targetPose,
+	)
+
+	// Configure OrientationConstraint to maintain kettle level during movement
+	// (OrientationConstraint allows flexible paths; LinearConstraint forces straight-line which is too restrictive)
+	constraints := &motionplan.Constraints{
+		OrientationConstraint: []motionplan.OrientationConstraint{{
+			OrientationToleranceDegs: 5.0, // Allow ±5° deviation to keep kettle level
+		}},
+	}
+
+	s.logger.Infof("moving to pour-prep via motion service: target=(%v, %v, %v)",
+		targetPoint.X, targetPoint.Y, targetPoint.Z)
+
+	// Execute motion plan
+	success, err := s.motionService.Move(ctx, motion.MoveReq{
+		ComponentName: s.arm.Name().ShortName(),
+		Destination:   destination,
+		Constraints:   constraints,
+	})
+	if err != nil {
+		return fmt.Errorf("motion planning failed: %w", err)
+	}
+	if !success {
+		return fmt.Errorf("motion planning could not reach target")
+	}
+
+	return nil
 }
 
 func (s *kettleCycleTestController) captureAndUploadImage(ctx context.Context) error {

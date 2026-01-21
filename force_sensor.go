@@ -22,8 +22,8 @@ func init() {
 }
 
 type ForceSensorConfig struct {
-	LoadCell       string  `json:"load_cell"`                    // REQUIRED: name of load cell sensor
-	UseMockCurve   bool    `json:"use_mock_curve,omitempty"`     // optional: use mock force curve instead of hardware
+	LoadCell       string  `json:"load_cell"`                // REQUIRED: name of load cell sensor
+	UseMockCurve   bool    `json:"use_mock_curve,omitempty"` // optional: use mock force curve instead of hardware
 	ForceKey       string  `json:"force_key,omitempty"`
 	SampleRateHz   int     `json:"sample_rate_hz,omitempty"`
 	BufferSize     int     `json:"buffer_size,omitempty"`
@@ -120,9 +120,9 @@ func (r *sensorForceReader) ReadForce(ctx context.Context) (float64, error) {
 type captureState int
 
 const (
-	captureIdle captureState = iota
-	captureWaiting  // waiting for first non-zero reading
-	captureActive   // actively capturing samples
+	captureIdle    captureState = iota
+	captureWaiting              // waiting for first non-zero reading
+	captureActive               // actively capturing samples
 )
 
 type forceSensor struct {
