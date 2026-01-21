@@ -10,7 +10,10 @@ import (
 	"go.viam.com/rdk/components/camera"
 	toggleswitch "go.viam.com/rdk/components/switch"
 	"go.viam.com/rdk/logging"
+	"go.viam.com/rdk/referenceframe"
 	"go.viam.com/rdk/resource"
+	"go.viam.com/rdk/services/motion"
+	"go.viam.com/rdk/spatialmath"
 	"go.viam.com/rdk/testutils/inject"
 )
 
@@ -19,10 +22,18 @@ func testDeps() (resource.Dependencies, *Config) {
 		Arm:              "test-arm",
 		RestingPosition:  "resting",
 		PourPrepPosition: "pour-prep",
+		MotionService:    "motion-1",
 	}
 	testArm := inject.NewArm("test-arm")
 	testArm.IsMovingFunc = func(ctx context.Context) (bool, error) {
 		return false, nil
+	}
+	testArm.EndPositionFunc = func(ctx context.Context, extra map[string]interface{}) (spatialmath.Pose, error) {
+		// Return a mock pose in world frame
+		return spatialmath.NewPose(
+			spatialmath.R3{X: 100, Y: 200, Z: 300},
+			&spatialmath.OrientationVectorDegrees{OX: 0, OY: 0, OZ: 1, Theta: 0},
+		), nil
 	}
 	restingSwitch := inject.NewSwitch("resting")
 	restingSwitch.SetPositionFunc = func(ctx context.Context, position uint32, extra map[string]interface{}) error {
@@ -32,10 +43,23 @@ func testDeps() (resource.Dependencies, *Config) {
 	pourPrepSwitch.SetPositionFunc = func(ctx context.Context, position uint32, extra map[string]interface{}) error {
 		return nil
 	}
+	motionService := inject.NewMotionService("motion-1")
+	motionService.MoveFunc = func(
+		ctx context.Context,
+		componentName resource.Name,
+		destination *referenceframe.PoseInFrame,
+		worldState *referenceframe.WorldState,
+		constraints *motion.Constraints,
+		extra map[string]interface{},
+	) ([]referenceframe.Input, error) {
+		// Mock motion service that always succeeds
+		return nil, nil
+	}
 	deps := resource.Dependencies{
-		resource.NewName(arm.API, "test-arm"):           testArm,
-		resource.NewName(toggleswitch.API, "resting"):   restingSwitch,
-		resource.NewName(toggleswitch.API, "pour-prep"): pourPrepSwitch,
+		resource.NewName(arm.API, "test-arm"):             testArm,
+		resource.NewName(toggleswitch.API, "resting"):     restingSwitch,
+		resource.NewName(toggleswitch.API, "pour-prep"):   pourPrepSwitch,
+		resource.NewName(motion.API, "motion-1"):          motionService,
 	}
 	return deps, cfg
 }
@@ -110,13 +134,14 @@ func TestConfigValidate(t *testing.T) {
 			Arm:              "my-arm",
 			RestingPosition:  "resting-switch",
 			PourPrepPosition: "pour-prep-switch",
+			MotionService:    "motion-1",
 		}
 		deps, _, err := cfg.Validate("test")
 		if err != nil {
 			t.Fatalf("Validate failed: %v", err)
 		}
-		if len(deps) != 3 {
-			t.Errorf("expected 3 dependencies, got %d", len(deps))
+		if len(deps) != 4 {
+			t.Errorf("expected 4 dependencies, got %d", len(deps))
 		}
 	})
 
@@ -124,6 +149,7 @@ func TestConfigValidate(t *testing.T) {
 		cfg := &Config{
 			RestingPosition:  "resting-switch",
 			PourPrepPosition: "pour-prep-switch",
+			MotionService:    "motion-1",
 		}
 		_, _, err := cfg.Validate("test")
 		if err == nil {
@@ -135,6 +161,7 @@ func TestConfigValidate(t *testing.T) {
 		cfg := &Config{
 			Arm:              "my-arm",
 			PourPrepPosition: "pour-prep-switch",
+			MotionService:    "motion-1",
 		}
 		_, _, err := cfg.Validate("test")
 		if err == nil {
@@ -146,10 +173,23 @@ func TestConfigValidate(t *testing.T) {
 		cfg := &Config{
 			Arm:             "my-arm",
 			RestingPosition: "resting-switch",
+			MotionService:   "motion-1",
 		}
 		_, _, err := cfg.Validate("test")
 		if err == nil {
 			t.Error("expected error for missing pour_prep_position")
+		}
+	})
+
+	t.Run("errors when motion_service missing", func(t *testing.T) {
+		cfg := &Config{
+			Arm:              "my-arm",
+			RestingPosition:  "resting-switch",
+			PourPrepPosition: "pour-prep-switch",
+		}
+		_, _, err := cfg.Validate("test")
+		if err == nil {
+			t.Error("expected error for missing motion_service")
 		}
 	})
 
@@ -159,6 +199,7 @@ func TestConfigValidate(t *testing.T) {
 			Arm:              "my-arm",
 			RestingPosition:  "resting-switch",
 			PourPrepPosition: "pour-prep-switch",
+			MotionService:    "motion-1",
 		}
 		_, _, err := cfg.Validate("test")
 		if err != nil {

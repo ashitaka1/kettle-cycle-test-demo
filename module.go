@@ -18,8 +18,11 @@ import (
 	"go.viam.com/rdk/components/sensor"
 	toggleswitch "go.viam.com/rdk/components/switch"
 	"go.viam.com/rdk/logging"
+	"go.viam.com/rdk/referenceframe"
 	"go.viam.com/rdk/resource"
 	generic "go.viam.com/rdk/services/generic"
+	"go.viam.com/rdk/services/motion"
+	"go.viam.com/rdk/spatialmath"
 )
 
 var Controller = resource.NewModel("viamdemo", "kettle-cycle-test", "controller")
@@ -36,6 +39,7 @@ type Config struct {
 	Arm              string `json:"arm"`
 	RestingPosition  string `json:"resting_position"`
 	PourPrepPosition string `json:"pour_prep_position"`
+	MotionService    string `json:"motion_service"`
 	ForceSensor      string `json:"force_sensor,omitempty"`
 
 	// Camera capture settings (Camera, DatasetID, PartID required if Camera is set)
@@ -63,6 +67,9 @@ func (cfg *Config) Validate(path string) ([]string, []string, error) {
 	if cfg.PourPrepPosition == "" {
 		return nil, nil, fmt.Errorf("%s: pour_prep_position is required", path)
 	}
+	if cfg.MotionService == "" {
+		return nil, nil, fmt.Errorf("%s: motion_service is required", path)
+	}
 
 	// If camera is configured, dataset_id and part_id are required
 	// API credentials come from environment variables
@@ -72,7 +79,7 @@ func (cfg *Config) Validate(path string) ([]string, []string, error) {
 		}
 	}
 
-	deps := []string{cfg.Arm, cfg.RestingPosition, cfg.PourPrepPosition}
+	deps := []string{cfg.Arm, cfg.RestingPosition, cfg.PourPrepPosition, cfg.MotionService}
 	if cfg.ForceSensor != "" {
 		deps = append(deps, cfg.ForceSensor)
 	}
@@ -89,10 +96,11 @@ type kettleCycleTestController struct {
 	logger logging.Logger
 	cfg    *Config
 
-	arm         arm.Arm
-	resting     toggleswitch.Switch
-	pourPrep    toggleswitch.Switch
-	forceSensor sensor.Sensor // optional, may be nil
+	arm           arm.Arm
+	resting       toggleswitch.Switch
+	pourPrep      toggleswitch.Switch
+	motionService motion.Service
+	forceSensor   sensor.Sensor // optional, may be nil
 
 	// Camera capture (optional)
 	camera     camera.Camera
@@ -134,6 +142,11 @@ func NewController(ctx context.Context, deps resource.Dependencies, name resourc
 		return nil, fmt.Errorf("getting pour_prep position switch: %w", err)
 	}
 
+	motionSvc, err := motion.FromDependencies(deps, conf.MotionService)
+	if err != nil {
+		return nil, fmt.Errorf("getting motion service: %w", err)
+	}
+
 	var fs sensor.Sensor
 	if conf.ForceSensor != "" {
 		fs, err = sensor.FromDependencies(deps, conf.ForceSensor)
@@ -170,20 +183,21 @@ func NewController(ctx context.Context, deps resource.Dependencies, name resourc
 	cancelCtx, cancelFunc := context.WithCancel(context.Background())
 
 	s := &kettleCycleTestController{
-		name:        name,
-		logger:      logger,
-		cfg:         conf,
-		arm:         a,
-		resting:     resting,
-		pourPrep:    pourPrep,
-		forceSensor: fs,
-		camera:      cam,
-		viamClient:  viamClient,
-		dataClient:  dataClient,
-		datasetID:   conf.DatasetID,
-		partID:      conf.PartID,
-		cancelCtx:   cancelCtx,
-		cancelFunc:  cancelFunc,
+		name:          name,
+		logger:        logger,
+		cfg:           conf,
+		arm:           a,
+		resting:       resting,
+		pourPrep:      pourPrep,
+		motionService: motionSvc,
+		forceSensor:   fs,
+		camera:        cam,
+		viamClient:    viamClient,
+		dataClient:    dataClient,
+		datasetID:     conf.DatasetID,
+		partID:        conf.PartID,
+		cancelCtx:     cancelCtx,
+		cancelFunc:    cancelFunc,
 	}
 	return s, nil
 }
@@ -220,7 +234,30 @@ func (s *kettleCycleTestController) handleExecuteCycle(ctx context.Context) (map
 	}
 	s.mu.Unlock()
 
-	if err := s.pourPrep.SetPosition(ctx, 2, nil); err != nil {
+	// Move to resting position first to establish known starting point
+	if err := s.resting.SetPosition(ctx, 2, nil); err != nil {
+		return nil, fmt.Errorf("moving to resting position: %w", err)
+	}
+
+	// Wait for arm to reach resting position
+	if err := s.waitForArmStopped(ctx); err != nil {
+		return nil, fmt.Errorf("error waiting for arm to stop at resting: %w", err)
+	}
+
+	// Get current pose in world frame
+	currentPose, err := s.arm.EndPosition(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("getting arm end position: %w", err)
+	}
+
+	// Calculate target pose: z + 120mm, y - 60mm from resting pose
+	targetPose, err := s.calculatePourPrepPose(currentPose)
+	if err != nil {
+		return nil, fmt.Errorf("calculating pour prep pose: %w", err)
+	}
+
+	// Move to pour-prep position using motion planning with orientation constraint
+	if err := s.moveToTargetPose(ctx, targetPose); err != nil {
 		return nil, fmt.Errorf("moving to pour_prep position: %w", err)
 	}
 
@@ -252,6 +289,7 @@ func (s *kettleCycleTestController) handleExecuteCycle(ctx context.Context) (map
 		}
 	}
 
+	// Return to resting position using switch
 	if err := s.resting.SetPosition(ctx, 2, nil); err != nil {
 		// Try to end capture on error
 		if s.forceSensor != nil {
@@ -494,6 +532,58 @@ func readDataAPICredentials() (apiKey, apiKeyID string, err error) {
 		return "", "", fmt.Errorf("credentials file missing api_key or api_key_id")
 	}
 	return creds.APIKey, creds.APIKeyID, nil
+}
+
+// calculatePourPrepPose creates a target pose offset from the resting pose
+// Offset: z + 120mm, y - 60mm, same orientation
+func (s *kettleCycleTestController) calculatePourPrepPose(restingPose spatialmath.Pose) (*referenceframe.PoseInFrame, error) {
+	// Get the current point and orientation
+	point := restingPose.Point()
+	orientation := restingPose.Orientation()
+
+	// Apply offsets: z + 120mm, y - 60mm
+	targetPoint := spatialmath.R3{
+		X: point.X,
+		Y: point.Y - 60.0, // -60mm in Y
+		Z: point.Z + 120.0, // +120mm in Z
+	}
+
+	// Create new pose with same orientation
+	targetPose := spatialmath.NewPose(targetPoint, orientation)
+
+	// Return as PoseInFrame in world frame
+	return referenceframe.NewPoseInFrame(referenceframe.World, targetPose), nil
+}
+
+// moveToTargetPose uses the motion service to move the arm to the target pose
+// with an orientation constraint to maintain the current orientation
+func (s *kettleCycleTestController) moveToTargetPose(ctx context.Context, targetPose *referenceframe.PoseInFrame) error {
+	// Create orientation constraint to maintain the same orientation
+	// This keeps the kettle level during movement
+	worldState, err := referenceframe.NewWorldState(nil, nil)
+	if err != nil {
+		return fmt.Errorf("creating world state: %w", err)
+	}
+
+	// Use the motion service Move method with orientation constraint
+	_, err = s.motionService.Move(
+		ctx,
+		resource.NewName(arm.API, s.cfg.Arm),
+		targetPose,
+		worldState,
+		&motion.Constraints{
+			OrientationConstraint: &motion.OrientationConstraint{
+				OrientationThresholdDegrees: 5.0, // Allow 5 degrees tolerance
+			},
+		},
+		nil, // no extra options
+	)
+	if err != nil {
+		return fmt.Errorf("motion service move failed: %w", err)
+	}
+
+	s.logger.Infof("moved to target pose: %v", targetPose)
+	return nil
 }
 
 func (s *kettleCycleTestController) Close(ctx context.Context) error {
