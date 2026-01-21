@@ -2,10 +2,12 @@ package kettlecycletest
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 
 	"go.viam.com/rdk/components/arm"
+	"go.viam.com/rdk/components/camera"
 	toggleswitch "go.viam.com/rdk/components/switch"
 	"go.viam.com/rdk/logging"
 	"go.viam.com/rdk/resource"
@@ -76,6 +78,32 @@ func TestClose(t *testing.T) {
 	}
 }
 
+func TestNewController_CameraRequiresCredentialsFile(t *testing.T) {
+	// This test verifies that camera config fails gracefully when
+	// the credentials file doesn't exist (which it won't in test env)
+	logger := logging.NewTestLogger(t)
+	name := resource.NewName(resource.APINamespaceRDK.WithServiceType("generic"), "test")
+	deps, cfg := testDeps()
+
+	// Add camera config
+	cfg.Camera = "test-camera"
+	cfg.DatasetID = "test-dataset"
+	cfg.PartID = "test-part"
+
+	// Add mock camera to deps
+	testCamera := inject.NewCamera("test-camera")
+	deps[resource.NewName(camera.API, "test-camera")] = testCamera
+
+	// Should fail because credentials file doesn't exist
+	_, err := NewController(context.Background(), deps, name, cfg, logger)
+	if err == nil {
+		t.Error("expected error when camera configured without credentials file")
+	}
+	if !strings.Contains(err.Error(), "credentials") {
+		t.Errorf("error should mention credentials, got: %v", err)
+	}
+}
+
 func TestConfigValidate(t *testing.T) {
 	t.Run("returns dependencies for valid config", func(t *testing.T) {
 		cfg := &Config{
@@ -124,6 +152,83 @@ func TestConfigValidate(t *testing.T) {
 			t.Error("expected error for missing pour_prep_position")
 		}
 	})
+
+	t.Run("camera requires dataset_id and part_id", func(t *testing.T) {
+		// Valid without camera
+		cfg := &Config{
+			Arm:              "my-arm",
+			RestingPosition:  "resting-switch",
+			PourPrepPosition: "pour-prep-switch",
+		}
+		_, _, err := cfg.Validate("test")
+		if err != nil {
+			t.Fatalf("expected valid config without camera: %v", err)
+		}
+
+		// Invalid: camera without dataset_id and part_id
+		cfg.Camera = "webcam"
+		_, _, err = cfg.Validate("test")
+		if err == nil {
+			t.Error("expected error when camera set without dataset_id and part_id")
+		}
+
+		// Invalid: camera with partial fields
+		cfg.DatasetID = "dataset-123"
+		_, _, err = cfg.Validate("test")
+		if err == nil {
+			t.Error("expected error when camera set with only dataset_id")
+		}
+
+		// Valid: camera with dataset_id and part_id
+		cfg.PartID = "part-456"
+		deps, _, err := cfg.Validate("test")
+		if err != nil {
+			t.Fatalf("expected valid config with camera, dataset_id, and part_id: %v", err)
+		}
+		// Should include camera in dependencies
+		found := false
+		for _, d := range deps {
+			if d == "webcam" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Error("expected camera in dependencies")
+		}
+	})
+}
+
+// --- Integration: Environment Prerequisites ---
+
+// --- Unit: Tag Formatting ---
+
+func TestFormatCaptureTags_WithTrial(t *testing.T) {
+	tags := formatCaptureTags("trial-20260120-140000", 5)
+
+	expected := []string{"trial_id:trial-20260120-140000", "cycle_count:5"}
+	if len(tags) != len(expected) {
+		t.Fatalf("expected %d tags, got %d", len(expected), len(tags))
+	}
+	for i, tag := range tags {
+		if tag != expected[i] {
+			t.Errorf("tag[%d] = %q, want %q", i, tag, expected[i])
+		}
+	}
+}
+
+func TestFormatCaptureTags_Standalone(t *testing.T) {
+	tags := formatCaptureTags("", 0)
+
+	expected := []string{"trial_id:standalone", "cycle_count:0"}
+	if len(tags) != len(expected) {
+		t.Fatalf("expected %d tags, got %d", len(expected), len(tags))
+	}
+	for i, tag := range tags {
+		if tag != expected[i] {
+			t.Errorf("tag[%d] = %q, want %q", i, tag, expected[i])
+		}
+	}
 }
 
 // --- Unit: execute_cycle State ---

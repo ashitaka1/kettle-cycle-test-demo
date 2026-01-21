@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Milestone 5: Camera Snapshot with Trial Correlation Tags
+
+**Added**
+- Camera component integration as optional dependency in controller config
+- Image capture at pour-prep position using `camera.Image()` and `image.Decode()`
+- Direct dataset upload via `UploadImageToDatasets()` from Data Management Service API
+- Per-image tagging with `trial_id:<id>` and `cycle_count:<n>` for ML training correlation
+- API credentials read from `/etc/viam-data-credentials.json` (workaround for unregistered modules)
+- Dataset management slash commands: `/dataset-create <name>` and `/dataset-delete <id>`
+- `.env.example` template for API credentials documentation
+- Config validation requiring dataset_id and part_id when camera is configured
+
+**Changed**
+- Cycle count now incremented at start of `handleExecuteCycle()` instead of end, ensuring camera and force sensor use same count
+- `waitForArmStopped()` timing pattern now used for both force capture and camera capture
+- Controller Close method now closes Viam client when camera is configured
+
+**Fixed**
+- SDK bug workaround: pass empty struct to `UploadImageToDatasets` opts parameter (nil causes panic)
+
 ### Milestone 4: Load Cell Integration for Put-Down Force Capture
 
 **Added**
