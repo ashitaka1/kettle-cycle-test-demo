@@ -17,6 +17,8 @@
 ### Current Milestone
 Milestone 5 complete. Camera captures snapshot at pour-prep position and uploads to Viam dataset with trial correlation tags.
 
+Milestones 6-7 (motion service) deferred - WIP on feature/motion-linear-constraint branch. Next: Milestone 8 (mock vision service).
+
 *(Keep this updated whenever a project phase or milestone advances.)*
 
 ## Open Questions
@@ -34,8 +36,9 @@ Milestone 5 complete. Camera captures snapshot at pour-prep position and uploads
 - Investigate whether modules can access Data Client without explicit API keys (using machine's inherent auth context) - current impl requires VIAM_API_KEY/VIAM_API_KEY_ID env vars
 
 # Implementation Notes
-- Use `LinearConstraint` for level kettle movement; highlight in README as Viam feature
-- Simple tilt-and-return pour for milestones; graceful arc motion is bonus round
+- Position-saver switches handle arm movements between saved positions (resting, pour-prep)
+- Motion service with LinearConstraint deferred - works but needs path planning iteration (see feature/motion-linear-constraint branch)
+- Simple tilt-and-return pour deferred until motion service issues resolved
 - Mock vision service allows alerting development before CV model is trained
 - Training mode tags images for dataset collection without acting on inference results
 - Position-saver switches (vmodutils) trigger arm movements; arm is explicit dependency for clarity in service dependency chain
