@@ -2,7 +2,7 @@
 
 A Viam robotics platform demo for appliance R&D labs, demonstrating cycle testing, failure detection, data capture, and alerting.
 
-> **Status:** Milestone 4 complete — force sensor captures load cell data during put-down phase via DoCommand coordination. See [product_spec.md](product_spec.md) for full roadmap.
+> **Status:** Milestone 5 complete — camera captures snapshot at pour-prep position and uploads to Viam dataset with trial correlation tags. See [product_spec.md](product_spec.md) for full roadmap.
 
 ## What This Demo Does
 
@@ -78,7 +78,10 @@ In the Viam app, add a generic service to your machine:
   "arm": "your-arm-name",
   "resting_position": "resting-switch-name",
   "pour_prep_position": "pour-prep-switch-name",
-  "force_sensor": "force-sensor"
+  "force_sensor": "force-sensor",
+  "camera": "webcam-1",
+  "dataset_id": "your-dataset-id",
+  "part_id": "your-part-id"
 }
 ```
 
@@ -89,6 +92,9 @@ Required fields:
 
 Optional fields:
 - `force_sensor` - Name of force sensor component to coordinate with during cycles
+- `camera` - Name of camera component for capturing cycle images (requires dataset_id and part_id)
+- `dataset_id` - Viam dataset ID for image uploads (required if camera is set)
+- `part_id` - Machine part ID for image uploads (required if camera is set)
 
 ### Adding the Cycle Sensor
 
@@ -386,6 +392,98 @@ This pattern provides several benefits:
 - **Data quality** - Only captures relevant data (during put-down) with proper correlation tags
 
 The controller optionally declares force_sensor in its config. If configured, it coordinates capture timing; if not, cycles run without force data. This loose coupling makes both components easier to test and maintain.
+
+## Milestone 5: Camera Snapshot with Tags
+
+The controller now captures camera images at pour-prep position and uploads them to Viam datasets with correlation tags.
+
+**What's Working:**
+- Camera capture at pour-prep position after arm stops moving
+- Image upload to Viam dataset via Data Management Service API
+- Per-image tags for correlation: `trial_id:<id>` and `cycle_count:<n>`
+- `waitForArmStopped()` ensures clean capture timing (no motion blur)
+- Image decoding with `image.Decode()` auto-detecting JPEG/PNG format
+- API credentials read from `/etc/viam-data-credentials.json`
+- Dataset management via slash commands: `/dataset-create`, `/dataset-delete`
+
+**Key Implementation Details:**
+- `/Users/apr/Developer/kettle-cycle-test-demo/module.go` - Lines 323-372 (`captureAndUploadImage` method), lines 465-476 (`formatCaptureTags` helper), lines 479-514 (`readDataAPICredentials` workaround)
+- Camera configured as optional dependency (like force sensor)
+- Cycle count incremented at start of cycle to ensure camera and force sensor use same count
+
+**Viam Concepts Introduced:**
+- **Data Management Service API** - `UploadImageToDatasets()` for programmatic dataset upload from modules
+- **Per-image tagging** - Tags parameter enables ML training correlation across datasets
+- **Image decoding** - `image.Decode()` auto-detects format from raw bytes (JPEG, PNG, etc.)
+- **Dataset lifecycle** - Datasets created/managed via Viam CLI, not programmatically
+- **API authentication** - Data Client requires API key + key ID for dataset operations
+
+**Dataset Management:**
+
+Create a dataset for the project:
+```bash
+viam dataset create --org-id <org_id> --name kettle-trial-images
+```
+
+Or use the slash command:
+```bash
+/dataset-create kettle-trial-images
+```
+
+List datasets to get the dataset ID:
+```bash
+viam dataset list --org-id <org_id>
+```
+
+**Camera Configuration:**
+
+Add camera to controller config (all three fields required):
+```json
+{
+  "camera": "webcam-1",
+  "dataset_id": "abc123-your-dataset-id",
+  "part_id": "def456-your-part-id"
+}
+```
+
+**API Credentials Setup:**
+
+The controller needs API credentials to upload images. Create a credentials file on the robot at `/etc/viam-data-credentials.json`:
+```json
+{
+  "api_key": "your-api-key-here",
+  "api_key_id": "your-api-key-id-here"
+}
+```
+
+Get API credentials from Viam app: Settings → API Keys → Create Key
+
+**Note:** This credentials file approach is a temporary workaround for hot-reloaded (unregistered) modules. Once the module is published to the Viam registry, it will use standard environment variable configuration.
+
+**Image Tags:**
+
+Each uploaded image includes tags for correlation with sensor data:
+- `trial_id:trial-20260120-143052` - Links image to specific trial
+- `cycle_count:42` - Links image to specific cycle within trial
+
+These tags enable ML model training where you can filter images by trial or cycle, and correlate visual data with force sensor readings from the same cycle.
+
+**Architecture Insight:**
+
+The camera integration demonstrates the **Data Management Service API** pattern for programmatic dataset upload from modules.
+
+Unlike the Data Client SDK (used for querying captured data), the Data Management Service provides direct upload capabilities with per-image tagging. This is essential for ML workflows where each image needs metadata for training correlation.
+
+**Key timing decision:** Images are captured after the arm stops moving at pour-prep position. This ensures:
+- No motion blur in captured images
+- Consistent camera position across all cycles
+- Clean correlation with force sensor data (both use same cycle_count)
+
+The `waitForArmStopped()` pattern (introduced in Milestone 4 for force capture) is reused here, demonstrating how helper functions create consistency across multiple capture workflows.
+
+**Tag format choice:** Tags use colon separator (`trial_id:value`) following Viam dataset conventions. This format is queryable in the Viam app UI and ML model training interface, enabling filtering like "show me all images from trial X" or "compare cycles 1-10 vs 90-100".
+
+**Cycle count timing:** The cycle count is incremented at the start of `handleExecuteCycle()` rather than at the end. This ensures the camera snapshot and force sensor readings both use the same cycle number, even though they're captured at different points in the cycle. Without this, you'd have off-by-one errors where image N is correlated with force data from cycle N+1.
 
 ## Development
 

@@ -18,6 +18,11 @@ ifeq ($(VIAM_TARGET_OS), windows)
 	MODULE_BINARY = bin/kettle-cycle-test.exe
 endif
 
+# Use no_cgo for linux/arm64 cross-compilation (avoids mediadevices CGO issues)
+ifeq ($(GOOS_VAL)$(GOARCH_VAL), linuxarm64)
+	GO_BUILD_FLAGS := -tags no_cgo
+endif
+
 $(MODULE_BINARY): Makefile go.mod *.go cmd/module/*.go
 	GOOS=$(GOOS_VAL) GOARCH=$(GOARCH_VAL) $(GO_BUILD_ENV) go build $(GO_BUILD_FLAGS) -o $(MODULE_BINARY) cmd/module/main.go
 

@@ -37,7 +37,7 @@ Kettle handle stress testing — robotic arm grips kettle by handle in a custom 
 2. ✅ Arm moves back and forth between two saved positions (resting, pour-prep) on command.
 3. ✅ Trial lifecycle management with start/stop/status commands, continuous background cycling, cycle-sensor component exposes state for data capture with conditional sync field.
 4. ✅ Force sensor component captures force profiles during put-down phase via DoCommand coordination pattern, wrapper component pattern, forceReader abstraction (mock or hardware), capture state machine, and waitForArmStopped timing helper.
-5. Camera stores snapshot of pour-prep pose with cycle record.
+5. ✅ Camera stores snapshot of pour-prep pose with cycle record via UploadImageToDatasets with per-image tags (trial_id, cycle_count).
 6. Motion service moves arm between saved positions with `LinearConstraint` keeping kettle level.
 7. Motion service performs simple tilt-and-return pouring motion while camera captures images.
 8. Mock vision service returns configurable `handle_intact` or `handle_broken` result for development.

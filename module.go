@@ -1,12 +1,20 @@
 package kettlecycletest
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"image"
+	_ "image/jpeg" // register JPEG decoder
+	_ "image/png"  // register PNG decoder
+	"os"
 	"sync"
 	"time"
 
+	"go.viam.com/rdk/app"
 	"go.viam.com/rdk/components/arm"
+	"go.viam.com/rdk/components/camera"
 	"go.viam.com/rdk/components/sensor"
 	toggleswitch "go.viam.com/rdk/components/switch"
 	"go.viam.com/rdk/logging"
@@ -29,6 +37,12 @@ type Config struct {
 	RestingPosition  string `json:"resting_position"`
 	PourPrepPosition string `json:"pour_prep_position"`
 	ForceSensor      string `json:"force_sensor,omitempty"`
+
+	// Camera capture settings (Camera, DatasetID, PartID required if Camera is set)
+	// API credentials read from VIAM_API_KEY and VIAM_API_KEY_ID environment variables
+	Camera    string `json:"camera,omitempty"`
+	DatasetID string `json:"dataset_id,omitempty"`
+	PartID    string `json:"part_id,omitempty"`
 }
 
 type trialState struct {
@@ -49,9 +63,21 @@ func (cfg *Config) Validate(path string) ([]string, []string, error) {
 	if cfg.PourPrepPosition == "" {
 		return nil, nil, fmt.Errorf("%s: pour_prep_position is required", path)
 	}
+
+	// If camera is configured, dataset_id and part_id are required
+	// API credentials come from environment variables
+	if cfg.Camera != "" {
+		if cfg.DatasetID == "" || cfg.PartID == "" {
+			return nil, nil, fmt.Errorf("%s: camera requires dataset_id and part_id", path)
+		}
+	}
+
 	deps := []string{cfg.Arm, cfg.RestingPosition, cfg.PourPrepPosition}
 	if cfg.ForceSensor != "" {
 		deps = append(deps, cfg.ForceSensor)
+	}
+	if cfg.Camera != "" {
+		deps = append(deps, cfg.Camera)
 	}
 	return deps, nil, nil
 }
@@ -67,6 +93,13 @@ type kettleCycleTestController struct {
 	resting     toggleswitch.Switch
 	pourPrep    toggleswitch.Switch
 	forceSensor sensor.Sensor // optional, may be nil
+
+	// Camera capture (optional)
+	camera     camera.Camera
+	viamClient *app.ViamClient
+	dataClient *app.DataClient
+	datasetID  string
+	partID     string
 
 	cancelCtx  context.Context
 	cancelFunc func()
@@ -110,6 +143,30 @@ func NewController(ctx context.Context, deps resource.Dependencies, name resourc
 		logger.Infof("controller using force sensor: %s", conf.ForceSensor)
 	}
 
+	// Camera and DataClient initialization (optional)
+	var cam camera.Camera
+	var viamClient *app.ViamClient
+	var dataClient *app.DataClient
+	if conf.Camera != "" {
+		cam, err = camera.FromDependencies(deps, conf.Camera)
+		if err != nil {
+			return nil, fmt.Errorf("getting camera: %w", err)
+		}
+
+		// Read API credentials from file (env vars don't work for hot-reloaded modules)
+		apiKey, apiKeyID, err := readDataAPICredentials()
+		if err != nil {
+			return nil, fmt.Errorf("camera configured but failed to read API credentials: %w", err)
+		}
+
+		viamClient, err = app.CreateViamClientWithAPIKey(ctx, app.Options{}, apiKey, apiKeyID, logger)
+		if err != nil {
+			return nil, fmt.Errorf("creating viam client: %w", err)
+		}
+		dataClient = viamClient.DataClient()
+		logger.Infof("controller using camera %s with dataset %s", conf.Camera, conf.DatasetID)
+	}
+
 	cancelCtx, cancelFunc := context.WithCancel(context.Background())
 
 	s := &kettleCycleTestController{
@@ -120,6 +177,11 @@ func NewController(ctx context.Context, deps resource.Dependencies, name resourc
 		resting:     resting,
 		pourPrep:    pourPrep,
 		forceSensor: fs,
+		camera:      cam,
+		viamClient:  viamClient,
+		dataClient:  dataClient,
+		datasetID:   conf.DatasetID,
+		partID:      conf.PartID,
 		cancelCtx:   cancelCtx,
 		cancelFunc:  cancelFunc,
 	}
@@ -151,14 +213,27 @@ func (s *kettleCycleTestController) DoCommand(ctx context.Context, cmd map[strin
 }
 
 func (s *kettleCycleTestController) handleExecuteCycle(ctx context.Context) (map[string]interface{}, error) {
+	// Increment cycle count at start so all captured data uses correct cycle number
+	s.mu.Lock()
+	if s.activeTrial != nil {
+		s.activeTrial.cycleCount++
+	}
+	s.mu.Unlock()
+
 	if err := s.pourPrep.SetPosition(ctx, 2, nil); err != nil {
 		return nil, fmt.Errorf("moving to pour_prep position: %w", err)
 	}
 
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case <-time.After(1 * time.Second):
+	// Wait for arm to reach pour-prep position
+	if err := s.waitForArmStopped(ctx); err != nil {
+		s.logger.Warnf("error waiting for arm to stop at pour-prep: %v", err)
+	}
+
+	// Capture and upload image if camera is configured
+	if s.camera != nil && s.dataClient != nil {
+		if err := s.captureAndUploadImage(ctx); err != nil {
+			return nil, fmt.Errorf("capturing image: %w", err)
+		}
 	}
 
 	// Start force capture if sensor is configured
@@ -204,7 +279,6 @@ func (s *kettleCycleTestController) handleExecuteCycle(ctx context.Context) (map
 
 	s.mu.Lock()
 	if s.activeTrial != nil {
-		s.activeTrial.cycleCount++
 		s.activeTrial.lastCycleAt = time.Now()
 	}
 	s.mu.Unlock()
@@ -243,6 +317,58 @@ func (s *kettleCycleTestController) waitForArmStopped(ctx context.Context) error
 			}
 		}
 	}
+}
+
+func (s *kettleCycleTestController) captureAndUploadImage(ctx context.Context) error {
+	// Get raw image bytes from camera
+	s.logger.Info("capturing image from camera")
+	imageBytes, _, err := s.camera.Image(ctx, "image/jpeg", nil)
+	if err != nil {
+		return fmt.Errorf("getting image from camera: %w", err)
+	}
+	if len(imageBytes) == 0 {
+		return fmt.Errorf("camera returned empty image")
+	}
+	s.logger.Infof("got %d bytes from camera", len(imageBytes))
+
+	// Decode using image.Decode which auto-detects format
+	img, format, err := image.Decode(bytes.NewReader(imageBytes))
+	if err != nil {
+		return fmt.Errorf("decoding image: %w", err)
+	}
+	if img == nil {
+		return fmt.Errorf("decoded image is nil")
+	}
+	s.logger.Infof("decoded image: format=%s, bounds=%v", format, img.Bounds())
+
+	// Build tags from current trial state
+	s.mu.Lock()
+	var trialID string
+	var cycleCount int
+	if s.activeTrial != nil {
+		trialID = s.activeTrial.trialID
+		cycleCount = s.activeTrial.cycleCount
+	}
+	s.mu.Unlock()
+
+	tags := formatCaptureTags(trialID, cycleCount)
+	s.logger.Infof("uploading to dataset %s with tags %v", s.datasetID, tags)
+
+	_, err = s.dataClient.UploadImageToDatasets(
+		ctx,
+		s.partID,
+		img,
+		[]string{s.datasetID},
+		tags,
+		app.MimeTypeJPEG,
+		&app.FileUploadOptions{},
+	)
+	if err != nil {
+		return fmt.Errorf("uploading image: %w", err)
+	}
+
+	s.logger.Infof("uploaded image with tags: %v", tags)
+	return nil
 }
 
 func (s *kettleCycleTestController) handleStart() (map[string]interface{}, error) {
@@ -336,7 +462,44 @@ func (s *kettleCycleTestController) GetState() map[string]interface{} {
 	}
 }
 
-func (s *kettleCycleTestController) Close(context.Context) error {
+// formatCaptureTags creates tags for image upload based on trial state.
+func formatCaptureTags(trialID string, cycleCount int) []string {
+	tid := trialID
+	if tid == "" {
+		tid = "standalone"
+	}
+	return []string{
+		fmt.Sprintf("trial_id:%s", tid),
+		fmt.Sprintf("cycle_count:%d", cycleCount),
+	}
+}
+
+// readDataAPICredentials reads API credentials from /etc/viam-data-credentials.json
+// HACK: This is a workaround for hot-reloaded (unregistered) modules which don't
+// support env var config in the Viam app UI. Once the module is published to the
+// registry, this should be replaced with proper env var configuration.
+func readDataAPICredentials() (apiKey, apiKeyID string, err error) {
+	data, err := os.ReadFile("/etc/viam-data-credentials.json")
+	if err != nil {
+		return "", "", fmt.Errorf("reading credentials file: %w", err)
+	}
+	var creds struct {
+		APIKey   string `json:"api_key"`
+		APIKeyID string `json:"api_key_id"`
+	}
+	if err := json.Unmarshal(data, &creds); err != nil {
+		return "", "", fmt.Errorf("parsing credentials file: %w", err)
+	}
+	if creds.APIKey == "" || creds.APIKeyID == "" {
+		return "", "", fmt.Errorf("credentials file missing api_key or api_key_id")
+	}
+	return creds.APIKey, creds.APIKeyID, nil
+}
+
+func (s *kettleCycleTestController) Close(ctx context.Context) error {
 	s.cancelFunc()
+	if s.viamClient != nil {
+		s.viamClient.Close()
+	}
 	return nil
 }
