@@ -1,0 +1,10 @@
+{
+  "hooks": {
+    "startsession": [
+      {
+        "command": "bash .claude/scripts/install-cloud-deps.sh",
+        "description": "Install missing dependencies in cloud environments"
+      }
+    ]
+  }
+}
