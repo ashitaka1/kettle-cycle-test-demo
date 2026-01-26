@@ -1,6 +1,6 @@
 ---
-name: viam-data-export
-description: Patterns for exporting and analyzing Viam sensor data via CLI
+name: kettle-data-export
+description: Patterns for exporting and analyzing kettle force sensor data via Viam CLI (see VIAM_GUIDE.md in viam-claude plugin for general Viam patterns)
 ---
 
 # Viam Data Export and Analysis
@@ -21,9 +21,9 @@ viam data export tabular \
 - `--method` is typically `Readings` for sensors
 - `--start` and `--end` accept ISO-8601 timestamps for time filtering
 
-**Get IDs from machine.json:**
+**Get IDs from viam-cli-data.json:**
 ```bash
-cat machine.json | jq '{part_id, machine_id, org_id}'
+cat viam-cli-data.json | jq '.dev_machine | {part_id, machine_id, org_id}'
 ```
 
 ## Data Format

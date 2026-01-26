@@ -1,20 +1,6 @@
 # Kettle Cycle Testing Demo Project
 
-## Project Planning
-
-1. Answer all project planning questions with a conversation or a research report
-2. Establish data schema within Viam's framework of data sync
-3. Finalize concept and outline for README
-4. Set up claude agents
-    - Docs updating agent with specific instructions for README
-    - Changelog
-    - Test scrutinizer
-    - Retro agent to help me tune my use of claude code features (claude.md, agents, slash commands)
-5. Set up any .env stuff (probably zero but check). Ask Claude for a template that takes my stack into account.
-6. Develop
-7. Publish module publicly
-
-### Current Milestone
+## Current Milestone
 Milestone 5 complete. Camera captures snapshot at pour-prep position and uploads to Viam dataset with trial correlation tags.
 
 Milestones 6-7 (motion service) deferred - WIP on feature/motion-linear-constraint branch. Next: Milestone 8 (mock vision service).
@@ -94,6 +80,7 @@ The README has a **target outline** (in product_spec.md) and a **backlog** (belo
 | Command | Description |
 |---------|-------------|
 | `/start-feature <name>` | Create and switch to a feature branch |
+| `/viam-cli-data` | Display Viam project metadata (org_id, machine_id, part_id, etc.) |
 | `/cycle` | Execute a single test cycle on the arm |
 | `/trial-start` | Start continuous trial (background cycling) |
 | `/trial-stop` | Stop active trial, return cycle count |
@@ -116,7 +103,7 @@ The README has a **target outline** (in product_spec.md) and a **backlog** (belo
 ### Development Commands
 - `go test ./...` — run all unit tests
 - `make module.tar.gz` — build packaged module
-- `make reload-module` — hot-reload module to robot (uses PART_ID from machine.json)
+- `make reload-module` — hot-reload module to robot (uses PART_ID from viam-cli-data.json)
 - `make test-cycle` — trigger execute_cycle DoCommand via CLI
 - `make trial-start` — start a trial (continuous cycling)
 - `make trial-stop` — stop the active trial
@@ -135,163 +122,6 @@ Use `/reload` or `make reload-module`. Builds, packages, uploads via shell servi
 ### TODO: Machine Config Sync
 Create a CLI tool/script to pull current machine config from Viam and store in repo, so machine construction is captured in version control.
 
-## Development Workflow
-
-### Starting Work
-1. **Run `pre-work-check` agent** — verifies feature branch and passing tests
-2. If on main, use `/start-feature <name>` to create branch
-3. Never commit directly to main
-
-**Important:** After context compaction, branch state may be lost. Always verify with `pre-work-check` before continuing work.
-
-### Feature Development
-Use `/feature-dev:feature-dev` as the primary workflow for non-trivial features. It provides:
-- Discovery and clarifying questions
-- Agent-driven codebase exploration
-- Architecture design with trade-off analysis
-- Implementation with quality review
-
-**Project-specific addition after Architecture Design (Phase 4):**
-Before implementation, create a test plan using the required template:
-
-| Test Name | Category | Custom Logic Tested |
-|-----------|----------|---------------------|
-| ... | ... | ... |
-
-Categories: Config validation, Constructor validation, State machine, Thread safety, Error handling, Integration, Documentation
-
-**Test Scrutiny Phase 1:** Delegate to `test-scrutinizer` agent for plan review. The agent will:
-- Verify each test names specific custom logic (not SDK/library code)
-- Validate categories are accurate (not just accepted at face value)
-- Save the approved proposal to `.claude/test-proposals/<branch-name>.md` for Phase 2 comparison
-
-Tests must name specific custom logic being tested — if you can't, it's likely plumbing.
-
-### Implementation Phase (TDD)
-1. Write tests according to approved plan
-2. Run tests (should fail)
-3. Implement feature
-4. Run tests (should pass)
-5. **Test Scrutiny Phase 2:** Delegate to `test-scrutinizer` agent for implementation review
-   - Agent reads saved proposal from `.claude/test-proposals/<branch-name>.md`
-   - Compares written tests against proposal
-   - Verifies tests actually test what they claimed to test
-   - Checks for proper techniques (direct handlers, state verification, direct state setup)
-6. **If Phase 2 fails:** Return to step 1 — rewrite tests to match proposal, or revise proposal and re-run Phase 1
-
-### Physical Validation
-Before updating docs, verify the feature works on real hardware:
-1. Build module: `make module.tar.gz`
-2. Deploy to machine: `/reload`
-3. Verify in Viam app (sensor test cards, component status)
-4. If issues found, fix and re-run unit tests before proceeding
-
-**Why this matters:** Unit tests verify logic, but physical validation catches integration issues (config problems, dependency resolution, hardware timing). Docs should describe working behavior, not theoretical behavior.
-
-### Committing Changes
-
-When asked to commit:
-1. Run tests: `go test ./...`
-2. If tests fail, abort and report
-3. Run `docs-updater` agent
-4. Run `changelog-updater` agent
-5. Stage doc changes
-6. Execute `git commit`
-
-### Completing Work
-1. **Delegate to `completion-checker` agent** — verify branch is ready to merge
-2. Address any blocking issues
-3. Merge branch to main (solo) or open PR (collaborative)
-4. Use `retro-reviewer` agent periodically to review Claude Code usage and suggest improvements
-
-## Testing Philosophy
-
-### Test the Right Things at the Right Layers
-
-**Unit tests** — custom logic only:
-- State machines (transitions, edge cases)
-- Config/constructor validation
-- Thread safety of concurrent operations
-- Error handling (our handling logic, not that errors propagate)
-
-**Integration tests** — system state at lifecycle boundaries:
-- State after start/stop operations
-- Correct initialization of compound state
-- Multi-component coordination results
-
-**Documentation tests** — prove contracts:
-- Wrapper components return exactly what they wrap (e.g., sensor.Readings() == controller.GetState())
-
-### What NOT to Test
-
-| Anti-pattern | Example | Why it's bad |
-|--------------|---------|--------------|
-| Plumbing | "DoCommand routes to handleStart" | Tests dispatch, not logic |
-| Delegation | "sensor.Readings calls controller.GetState" | Tests wiring, not behavior |
-| Library code | "switch.SetPosition moves arm" | Trust the SDK |
-| Orchestration | "execute_cycle calls switch A then switch B" | Tests sequence, not outcomes |
-| Dead code | "GetSamplingPhase returns empty" | If unused, delete it |
-| Constants | "defaultTimeout == 10s" | Tautology |
-
-### Testing Techniques
-
-**Direct handler calls** — test handlers directly, not through DoCommand:
-```go
-// Bad: tests DoCommand dispatch + handler
-kctrl.DoCommand(ctx, map[string]interface{}{"command": "start"})
-
-// Good: tests handler logic only
-kctrl.handleStart()
-```
-
-**State verification over call verification** — verify resulting state, not that calls were made:
-```go
-// Bad: verify switch was called
-assert(mockSwitch.SetPositionCalled)
-
-// Good: verify system state after operation
-state := kctrl.GetState()
-assert(state["cycle_count"] == 1)
-```
-
-**Direct state setup** — set state directly rather than calling code that sets state (unless testing that code):
-```go
-// Bad: calls handleStart() which spawns goroutine, creating race with our test
-kctrl.handleStart()
-kctrl.handleExecuteCycle(ctx)
-state := kctrl.GetState() // racing with background loop!
-
-// Good: manually set up trial state to test cycle increment in isolation
-kctrl.mu.Lock()
-kctrl.activeTrial = &trialState{trialID: "test", stopCh: make(chan struct{})}
-kctrl.mu.Unlock()
-kctrl.handleExecuteCycle(ctx)
-state := kctrl.GetState() // no race, testing exactly what we want
-```
-
-This isolates the logic under test. If `handleStart()` breaks, a test for `handleStart()` will catch it — not every test that happens to use it.
-
-### Test Proposal Template
-
-When proposing tests during planning, use this format:
-
-| Test Name | Category | Custom Logic Tested |
-|-----------|----------|---------------------|
-| TestTrial_StartWhileRunning_Errors | State machine | Mutex-protected concurrent start rejection |
-| TestForceSensor_BufferRolling | State machine | Ring buffer overflow handling |
-| TestTrialSensor_ReadingsMatchesController | Documentation | Wrapper returns identical state to source |
-
-**Categories:**
-- `Config validation` — required fields, invalid values
-- `Constructor validation` — dependency resolution, initialization errors
-- `State machine` — transitions, guards, concurrent access
-- `Thread safety` — race conditions under concurrent access
-- `Error handling` — our error wrapping/recovery logic
-- `Integration` — system state at lifecycle boundaries
-- `Documentation` — proves API contracts
-
-The category + custom logic columns implicitly justify the test. If you can't name specific custom logic being tested, the test is likely plumbing.
-
 ## Troubleshooting
 
 ### Module Won't Register
@@ -301,7 +131,7 @@ The category + custom logic columns implicitly justify the test. If you can't na
 
 ### Hot Reload Fails
 - **Symptom:** `viam module reload-local` hangs or errors
-- **Fix:** Check `machine.json` has correct part_id and machine is online
+- **Fix:** Check `viam-cli-data.json` has correct part_id and machine is online
 
 ### Service vs Component Mismatch
 - **Symptom:** "unknown resource type" error in logs
@@ -339,27 +169,3 @@ The category + custom logic columns implicitly justify the test. If you can't na
 7. CV detects failure, alert fires, cycle stops
 8. Show captured data: images, force profiles, event log
 9. Show fragment configuration with variable substitution
-
-
-# Design Guidelines
-
-## Constraints
-
-### Security
-- Always run tests before committing
-- Always use environment variables for secrets
-- Never commit .env.local or any file with API Keys.
-
-### Git Safety: Never Discard Uncommitted Work
-
-Before running ANY command that discards changes (`git checkout -- <file>`, `git restore`, `git reset --hard`, `git stash drop`):
-
-1. **Identify where the changes belong** — which branch should own them?
-2. **Preserve them first:**
-   - If they belong on current branch: commit them
-   - If they belong on a different branch: stash, switch, apply, commit, switch back
-   - If unsure: `git stash` and tell the user
-3. **Ask the user** if there's any ambiguity about whether changes should be kept
-
-**Never assume uncommitted changes can be safely discarded.** Even if they seem unrelated to the current task, they represent work that may not exist anywhere else.
-

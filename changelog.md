@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Developer Experience Improvements
+
+**Added**
+- `/viam-cli-data` skill to expose project Viam metadata (org_id, machine_id, part_id, location_id, machine_address)
+- Structured `viam-cli-data.json` configuration file with nested `dev_machine` block
+
+**Changed**
+- Renamed `machine.json` → `viam-cli-data.json` for clarity of purpose
+- Makefile now uses `.dev_machine.part_id` path for PART_ID extraction
+- Updated `.gitignore` to ignore `viam-cli-data.json` instead of `machine.json`
+
 ### Milestone 5: Camera Snapshot with Trial Correlation Tags
 
 **Added**

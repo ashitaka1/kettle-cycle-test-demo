@@ -49,7 +49,7 @@ all: test module.tar.gz
 setup:
 	go mod tidy
 
-PART_ID ?= $(shell jq -r '.part_id' machine.json)
+PART_ID ?= $(shell jq -r '.dev_machine.part_id' viam-cli-data.json)
 
 reload-module:
 	rm -f module.tar.gz $(MODULE_BINARY)

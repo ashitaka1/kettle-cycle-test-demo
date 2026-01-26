@@ -1,5 +1,5 @@
 # Machine-specific configuration
-machine.json
+viam-cli-data.json
 
 # Environment files
 .env

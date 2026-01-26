@@ -51,15 +51,17 @@ The force sensor captures force profiles during the put-down phase of each cycle
 
 ### Machine Configuration
 
-Create a `machine.json` file in the project root with your Viam machine details:
+Create a `viam-cli-data.json` file in the project root with your Viam machine details:
 
 ```json
 {
-  "org_id": "your-org-id",
-  "location_id": "your-location-id",
-  "machine_id": "your-machine-id",
-  "part_id": "your-part-id",
-  "machine_address": "your-machine.viam.cloud"
+  "dev_machine": {
+    "org_id": "your-org-id",
+    "location_id": "your-location-id",
+    "machine_id": "your-machine-id",
+    "part_id": "your-part-id",
+    "machine_address": "your-machine.viam.cloud"
+  }
 }
 ```
 
@@ -493,11 +495,11 @@ The `waitForArmStopped()` pattern (introduced in Milestone 4 for force capture) 
 make reload-module
 ```
 
-Builds for the target architecture, uploads, and restarts the module on the configured machine. Uses PART_ID from `machine.json`.
+Builds for the target architecture, uploads, and restarts the module on the configured machine. Uses PART_ID from `viam-cli-data.json`.
 
 Alternatively, use the Viam CLI directly:
 ```bash
-viam module reload-local --part-id <part_id from machine.json>
+viam module reload-local --part-id <part_id from viam-cli-data.json>
 ```
 
 ### Run Tests
