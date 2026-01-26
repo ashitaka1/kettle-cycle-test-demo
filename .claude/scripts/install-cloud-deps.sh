@@ -4,48 +4,10 @@
 
 set -e
 
-# Detect if we're in a cloud environment
-is_cloud_environment() {
-    # GitHub Codespaces
-    if [[ -n "$CODESPACES" || -n "$GITHUB_CODESPACE_TOKEN" ]]; then
-        return 0
-    fi
-
-    # Gitpod
-    if [[ -n "$GITPOD_WORKSPACE_ID" ]]; then
-        return 0
-    fi
-
-    # Generic cloud container detection (common in cloud IDEs)
-    if [[ -n "$CLOUD_SHELL" || -n "$CLOUD_IDE" ]]; then
-        return 0
-    fi
-
-    # AWS Cloud9
-    if [[ -n "$C9_USER" || -n "$C9_PID" ]]; then
-        return 0
-    fi
-
-    # Google Cloud Shell
-    if [[ -n "$GOOGLE_CLOUD_SHELL" ]]; then
-        return 0
-    fi
-
-    # Replit
-    if [[ -n "$REPL_ID" || -n "$REPLIT_DB_URL" ]]; then
-        return 0
-    fi
-
-    # Check if running in a container (fallback for generic cloud environments)
-    if [[ -f /.dockerenv ]] || grep -q docker /proc/1/cgroup 2>/dev/null; then
-        # Only treat as cloud if we also see signs of a cloud IDE
-        if [[ -n "$USER" && "$USER" != "root" && -d "/home/$USER" ]]; then
-            return 0
-        fi
-    fi
-
-    return 1
-}
+# Only run in remote/cloud environments
+if [ "$CLAUDE_CODE_REMOTE" != "true" ]; then
+    exit 0
+fi
 
 # Check if a command exists
 command_exists() {
@@ -154,12 +116,7 @@ install_jq() {
 
 # Main execution
 main() {
-    if ! is_cloud_environment; then
-        echo "Not a cloud environment - skipping dependency installation"
-        exit 0
-    fi
-
-    echo "Cloud environment detected - checking dependencies..."
+    echo "Remote environment detected - checking dependencies..."
 
     install_go
     install_viam_cli
@@ -172,7 +129,7 @@ main() {
         go mod tidy
     fi
 
-    echo "Cloud dependency setup complete"
+    echo "Remote environment dependency setup complete"
 }
 
 main "$@"
