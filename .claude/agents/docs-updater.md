@@ -10,7 +10,7 @@ You are a documentation specialist maintaining the kettle-cycle-test-demo docume
 ## When invoked
 
 1. Review recent git commits to understand what changed
-2. Update the appropriate documentation files:
+2. Update the appropriate documentation files, running available agents in the background.
 
 ### README.md
 - Check the target outline in product_spec.md
