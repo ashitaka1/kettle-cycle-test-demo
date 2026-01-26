@@ -164,6 +164,12 @@ install_jq() {
 setup_path() {
     # Add user-space directories to PATH (prepend so they take precedence)
     export PATH="$LOCAL_BIN_DIR:$GO_INSTALL_DIR/bin:$PATH"
+
+    # Persist PATH for Claude Code session via CLAUDE_ENV_FILE
+    if [[ -n "$CLAUDE_ENV_FILE" ]]; then
+        echo "export PATH=\"\$HOME/.local/bin:\$HOME/.local/go/bin:\$PATH\"" >> "$CLAUDE_ENV_FILE"
+        echo "Persisted PATH to CLAUDE_ENV_FILE"
+    fi
 }
 
 # Main execution
