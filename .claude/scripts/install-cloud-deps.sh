@@ -58,18 +58,31 @@ install_viam_cli() {
 
     echo "Installing Viam CLI..."
 
-    # Use official Viam install script
-    curl -s https://raw.githubusercontent.com/viamrobotics/viam-cli/main/install.sh | bash
+    # Detect architecture
+    ARCH=$(uname -m)
+    case "$ARCH" in
+        x86_64) ARCH="amd64" ;;
+        aarch64|arm64) ARCH="arm64" ;;
+        *) echo "Unsupported architecture: $ARCH"; return 1 ;;
+    esac
 
-    # Add to PATH for current session if installed to ~/.local/bin
-    if [[ -f ~/.local/bin/viam ]]; then
-        export PATH=$PATH:~/.local/bin
-        if ! grep -q '~/.local/bin' ~/.bashrc 2>/dev/null; then
-            echo 'export PATH=$PATH:~/.local/bin' >> ~/.bashrc
-        fi
+    # Create ~/.local/bin if it doesn't exist
+    mkdir -p ~/.local/bin
+
+    # Download the correct binary for architecture
+    VIAM_URL="https://storage.googleapis.com/packages.viam.com/apps/viam-cli/viam-cli-stable-linux-${ARCH}"
+    curl -fsSL -o ~/.local/bin/viam "$VIAM_URL"
+    chmod +x ~/.local/bin/viam
+
+    # Add to PATH for current session
+    export PATH=$PATH:~/.local/bin
+
+    # Add to shell profile if not already present
+    if ! grep -q '~/.local/bin' ~/.bashrc 2>/dev/null; then
+        echo 'export PATH=$PATH:~/.local/bin' >> ~/.bashrc
     fi
 
-    echo "Viam CLI installed"
+    echo "Viam CLI installed: $(~/.local/bin/viam version 2>/dev/null || echo 'installed')"
 }
 
 # Install make if missing

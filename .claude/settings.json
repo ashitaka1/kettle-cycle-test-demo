@@ -1,9 +1,14 @@
 {
   "hooks": {
-    "startsession": [
+    "SessionStart": [
       {
-        "command": "bash .claude/scripts/install-cloud-deps.sh",
-        "description": "Install missing dependencies in cloud environments"
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/scripts/install-cloud-deps.sh"
+          }
+        ]
       }
     ]
   }
