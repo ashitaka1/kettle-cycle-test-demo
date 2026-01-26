@@ -160,15 +160,19 @@ install_jq() {
     echo "jq installed"
 }
 
-# Setup PATH to prefer user-space installations
-setup_path() {
+# Setup PATH and environment to prefer user-space installations
+setup_env() {
     # Add user-space directories to PATH (prepend so they take precedence)
     export PATH="$LOCAL_BIN_DIR:$GO_INSTALL_DIR/bin:$PATH"
 
-    # Persist PATH for Claude Code session via CLAUDE_ENV_FILE
+    # Extend NO_PROXY to include Go domains (avoids proxy issues with go mod)
+    export NO_PROXY="${NO_PROXY:+$NO_PROXY,}proxy.golang.org,sum.golang.org,index.golang.org"
+
+    # Persist environment for Claude Code session via CLAUDE_ENV_FILE
     if [[ -n "$CLAUDE_ENV_FILE" ]]; then
         echo "export PATH=\"\$HOME/.local/bin:\$HOME/.local/go/bin:\$PATH\"" >> "$CLAUDE_ENV_FILE"
-        echo "Persisted PATH to CLAUDE_ENV_FILE"
+        echo "export NO_PROXY=\"\${NO_PROXY:+\$NO_PROXY,}proxy.golang.org,sum.golang.org,index.golang.org\"" >> "$CLAUDE_ENV_FILE"
+        echo "Persisted PATH and NO_PROXY to CLAUDE_ENV_FILE"
     fi
 }
 
@@ -181,8 +185,8 @@ main() {
     install_make
     install_jq
 
-    # Ensure PATH includes user-space installations
-    setup_path
+    # Ensure PATH and proxy settings are configured
+    setup_env
 
     # Run go mod tidy to ensure Go dependencies are ready
     if [[ -x "$GO_INSTALL_DIR/bin/go" ]] && [[ -f "go.mod" ]]; then
