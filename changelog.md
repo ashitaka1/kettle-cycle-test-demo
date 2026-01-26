@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Documentation Structure
+
+**Changed**
+- Restructured project documentation to separate workflow (CLAUDE.md) from architecture (product_spec.md)
+- Moved Technical Debt and Implementation Notes sections from CLAUDE.md to product_spec.md
+- CLAUDE.md now focuses on commands, troubleshooting, and development workflow
+- product_spec.md now contains all technical architecture, decisions, and implementation details
+- Updated CLAUDE.md Documentation section to clarify purpose of each doc file
+
 ### Developer Experience Improvements
 
 **Added**
