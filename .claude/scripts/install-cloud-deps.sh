@@ -168,11 +168,14 @@ setup_env() {
     # Extend NO_PROXY to include Go domains (avoids proxy issues with go mod)
     export NO_PROXY="${NO_PROXY:+$NO_PROXY,}proxy.golang.org,sum.golang.org,index.golang.org"
 
+    # Use direct Go module fetching (bypasses proxy DNS issues in cloud environments)
+    export GOPROXY=direct
+
     # Persist environment for Claude Code session via CLAUDE_ENV_FILE
     if [[ -n "$CLAUDE_ENV_FILE" ]]; then
         echo "export PATH=\"\$HOME/.local/bin:\$HOME/.local/go/bin:\$PATH\"" >> "$CLAUDE_ENV_FILE"
-        echo "export NO_PROXY=\"\${NO_PROXY:+\$NO_PROXY,}proxy.golang.org,sum.golang.org,index.golang.org\"" >> "$CLAUDE_ENV_FILE"
-        echo "Persisted PATH and NO_PROXY to CLAUDE_ENV_FILE"
+        echo "export GOPROXY=direct" >> "$CLAUDE_ENV_FILE"
+        echo "Persisted PATH and GOPROXY to CLAUDE_ENV_FILE"
     fi
 }
 
