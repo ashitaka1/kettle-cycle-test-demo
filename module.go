@@ -119,24 +119,24 @@ func newKettleCycleTestController(ctx context.Context, deps resource.Dependencie
 }
 
 func NewController(ctx context.Context, deps resource.Dependencies, name resource.Name, conf *Config, logger logging.Logger) (resource.Resource, error) {
-	a, err := arm.FromDependencies(deps, conf.Arm)
+	a, err := arm.FromProvider(deps, conf.Arm)
 	if err != nil {
 		return nil, fmt.Errorf("getting arm: %w", err)
 	}
 
-	resting, err := toggleswitch.FromDependencies(deps, conf.RestingPosition)
+	resting, err := toggleswitch.FromProvider(deps, conf.RestingPosition)
 	if err != nil {
 		return nil, fmt.Errorf("getting resting position switch: %w", err)
 	}
 
-	pourPrep, err := toggleswitch.FromDependencies(deps, conf.PourPrepPosition)
+	pourPrep, err := toggleswitch.FromProvider(deps, conf.PourPrepPosition)
 	if err != nil {
 		return nil, fmt.Errorf("getting pour_prep position switch: %w", err)
 	}
 
 	var fs sensor.Sensor
 	if conf.ForceSensor != "" {
-		fs, err = sensor.FromDependencies(deps, conf.ForceSensor)
+		fs, err = sensor.FromProvider(deps, conf.ForceSensor)
 		if err != nil {
 			return nil, fmt.Errorf("getting force sensor: %w", err)
 		}
@@ -148,7 +148,7 @@ func NewController(ctx context.Context, deps resource.Dependencies, name resourc
 	var viamClient *app.ViamClient
 	var dataClient *app.DataClient
 	if conf.Camera != "" {
-		cam, err = camera.FromDependencies(deps, conf.Camera)
+		cam, err = camera.FromProvider(deps, conf.Camera)
 		if err != nil {
 			return nil, fmt.Errorf("getting camera: %w", err)
 		}

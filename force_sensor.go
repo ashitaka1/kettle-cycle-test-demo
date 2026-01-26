@@ -178,7 +178,7 @@ func newForceSensor(ctx context.Context, deps resource.Dependencies, rawConf res
 		reader = newMockForceReader()
 		logger.Infof("force-sensor using mock curve (use_mock_curve=true)")
 	} else {
-		loadCellSensor, err := sensor.FromDependencies(deps, conf.LoadCell)
+		loadCellSensor, err := sensor.FromProvider(deps, conf.LoadCell)
 		if err != nil {
 			return nil, fmt.Errorf("getting load_cell sensor: %w", err)
 		}
