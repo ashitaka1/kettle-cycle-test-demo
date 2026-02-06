@@ -172,11 +172,11 @@ setup_env() {
     export GOPROXY=direct
 
     # Persist environment for Claude Code session via CLAUDE_ENV_FILE
-    if [[ -n "$CLAUDE_ENV_FILE" ]]; then
-        echo "export PATH=\"\$HOME/.local/bin:\$HOME/.local/go/bin:\$PATH\"" > "$CLAUDE_ENV_FILE"
-        echo "export NO_PROXY=\"${NO_PROXY:+$NO_PROXY,}proxy.golang.org,sum.golang.org,index.golang.org,storage.googleapis.com\"" >> "$CLAUDE_ENV_FILE"
-        echo "export GOPROXY=direct" >> "$CLAUDE_ENV_FILE"
-        echo "Persisted PATH and GOPROXY to CLAUDE_ENV_FILE"
+    if [ -n "$CLAUDE_ENV_FILE" ]; then
+        echo 'export PATH="$HOME/.local/bin:$HOME/.local/go/bin:$PATH"' >> "$CLAUDE_ENV_FILE"
+        echo 'export NO_PROXY="${NO_PROXY:+$NO_PROXY,}proxy.golang.org,sum.golang.org,index.golang.org,storage.googleapis.com"' >> "$CLAUDE_ENV_FILE"
+        echo 'export GOPROXY=direct' >> "$CLAUDE_ENV_FILE"
+        echo "Persisted PATH and GOPROXY to $CLAUDE_ENV_FILE"
     fi
 }
 
