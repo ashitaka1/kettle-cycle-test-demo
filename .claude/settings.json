@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/scripts/install-cloud-deps.sh",
+            "timeout": 180,
+            "statusMessage": "Installing dependencies"
+          }
+        ]
+      }
+    ]
+  }
+}
