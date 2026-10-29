@@ -39,7 +39,6 @@ The README has a **target outline** (in product_spec.md) and a **backlog** (belo
 
 | Command | Description |
 |---------|-------------|
-| `/start-feature <name>` | Create and switch to a feature branch |
 | `/viam-cli-data` | Display Viam project metadata (org_id, machine_id, part_id, etc.) |
 | `/cycle` | Execute a single test cycle on the arm |
 | `/trial-start` | Start continuous trial (background cycling) |
